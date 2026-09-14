@@ -1,3 +1,5 @@
+.keys
+
 # Logs
 logs
 *.log
@@ -141,3 +143,30 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# --- snowbot ---
+# Credentials. Nothing matching these may ever be committed: this repo is public.
+secrets/
+keys.txt
+*.pem
+*.p12
+id_ed25519*
+id_rsa*
+/snowbot
+/snowbot.pub
+# GCP service-account key files, wherever they land
+*service_account*.json
+project-*.json
+gcp*.json
+
+# Local config and state
+.env
+.env.*
+!.env.example
+config.local.yaml
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+test/.tmp/

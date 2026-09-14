@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+secrets
+.git
+.env
+.env.*
+config.local.yaml
+test
+coverage

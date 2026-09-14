@@ -1,0 +1,313 @@
+# snowbot configuration.
+#
+# Secrets NEVER live here — they come from the environment (see .env.example).
+# Anything in this file is public: the repo is public.
+#
+# A gitignored `config.local.yaml` is deep-merged over this file if present,
+# so any block can be overridden privately without touching the repo.
+
+timezone: America/New_York
+currency_display: USD # everything is normalized to USD before it is shown
+
+discord:
+  # Real channel lives on Elliot's guild. The bot is deliberately NOT invited
+  # there yet — see PHASE-0.md §3a. Everything through Phase 3 runs against test.
+  guild_id_env: DISCORD_GUILD_ID
+  channel_id_env: DISCORD_CHANNEL_ID
+  test_guild_id_env: DISCORD_TEST_GUILD_ID
+  test_channel_id_env: DISCORD_TEST_CHANNEL_ID
+  # Backstop against being annoying. See PLAN.md §2.
+  max_root_posts_per_day: 2
+  anchor:
+    # The self-editing pinned Aspen status message.
+    pin: true
+
+roster:
+  # Public by design — Devin confirmed names + airports in the public repo are fine.
+  # Airports are in preference order. `price_all: true` means every listed airport
+  # is priced on every search, not just the first.
+  - name: Devin
+    discord_id_env: DISCORD_USER_DEVIN
+    airports: [JFK, LGA, EWR]
+    price_all: false
+  - name: Andre
+    discord_id_env: DISCORD_USER_ANDRE
+    airports: [EWR, JFK, LGA]
+    price_all: false
+  - name: Elliot
+    discord_id_env: DISCORD_USER_ELLIOT
+    airports: [BUR, LAX]
+    price_all: true # both priced every time, delta stated out loud
+  - name: Jeremy
+    discord_id_env: DISCORD_USER_JEREMY
+    airports: [SNA, LAX]
+    price_all: true
+  - name: Hagen
+    discord_id_env: DISCORD_USER_HAGEN
+    airports: [SFO, OAK, SJC]
+    price_all: false
+
+aspen:
+  name: Aspen Snowmass
+  window_start: 2027-01-24
+  window_end: 2027-01-30
+  lat: 39.2084
+  lon: -106.9490
+  base_elevation_m: 2422
+  summit_elevation_m: 3813
+  airports: [ASE, EGE, DEN] # in order of convenience, not price
+  cadence:
+    monthly_from: 2026-10-01
+    weekly_from: 2026-12-14
+    daily_from: 2027-01-19
+
+weather:
+  # Which WeatherNext door to use: bigquery | maps
+  weathernext_provider: bigquery
+  bigquery:
+    project_id_env: GCP_PROJECT_ID
+    # The Analytics Hub *linked dataset* name you chose when subscribing.
+    # NOT the table names. Set it in .env once confirmed.
+    dataset_id_env: GCP_DATASET_ID
+    table_0p1deg: weathernext_3_0_0_0p1deg
+    table_0p05deg: weathernext_3_0_0_0p05deg
+    preferred_table: table_0p1deg
+    # Guardrails — a query that would scan more than this is refused, not run.
+    max_bytes_billed: 2000000000 # 2 GB
+  open_meteo:
+    models: [ecmwf_ifs025, ecmwf_aifs025, icon_eu, gfs_seamless, ncep_nam_conus]
+    forecast_days: 15
+  cache_ttl_minutes:
+    forecast: 180
+    archive: 720
+    seasonal: 1440
+
+flights:
+  provider: serpapi
+  date_flex_days: 2
+  cache_ttl_hours: 144 # 6 days, per PLAN.md §10
+  monthly_search_cap: 220 # degrade to weekly rather than blowing the quota
+
+lodging:
+  provider: serpapi
+  min_sleeps: 5
+  cache_ttl_hours: 144
+
+llm:
+  fast_model: claude-haiku-4-5 # routine post formatting
+  smart_model: claude-sonnet-4-6 # dossiers, web-search lookups
+  monthly_usd_cap: 15
+
+expedition:
+  ceiling_usd:
+    international: 2600 # provisional — near_misses logs the real numbers
+    domestic: 1400
+  repeat_cooldown_weeks: 4
+  arrival_window_hours: 6
+  ranking_weights:
+    forecast_snow_10d_confidence_weighted: 0.45
+    observed_snow_7d: 0.20
+    cost: 0.20
+    logistics_ease: 0.15
+
+# Destination board.
+# Coordinates are approximate resort-base positions and are flagged for
+# verification in Packet 2. `pass_verify: true` means the IKON/blackout answer
+# must come from a live lookup (Packet 6) before it can appear in a dossier —
+# nothing here is quoted to the group as fact.
+board:
+  - id: niseko
+    name: Niseko United
+    region: JP
+    lat: 42.8639
+    lon: 140.6875
+    base_elevation_m: 255
+    summit_elevation_m: 1308
+    airport: CTS
+    ground: Bus CTS -> Hirafu
+    lodging_band_usd_pp_night: [110, 160]
+    min_days: 8
+    ideal_days: 10
+    pass_verify: true
+  - id: rusutsu
+    name: Rusutsu
+    region: JP
+    lat: 42.7333
+    lon: 140.9083
+    base_elevation_m: 400
+    summit_elevation_m: 994
+    airport: CTS
+    ground: Bus CTS -> Rusutsu
+    lodging_band_usd_pp_night: [100, 150]
+    min_days: 8
+    ideal_days: 10
+    pass_verify: true
+  - id: hakuba
+    name: Hakuba Valley
+    region: JP
+    lat: 36.6983
+    lon: 137.8361
+    base_elevation_m: 760
+    summit_elevation_m: 1831
+    airport: HND
+    ground: Bus/train HND -> Hakuba
+    lodging_band_usd_pp_night: [90, 140]
+    min_days: 8
+    ideal_days: 10
+    pass_verify: true
+  - id: nozawa
+    name: Nozawa Onsen
+    region: JP
+    lat: 36.9219
+    lon: 138.4436
+    base_elevation_m: 565
+    summit_elevation_m: 1650
+    airport: HND
+    ground: Shinkansen to Iiyama + bus
+    lodging_band_usd_pp_night: [90, 140]
+    min_days: 8
+    ideal_days: 10
+    pass_verify: true
+  - id: whistler
+    name: Whistler Blackcomb
+    region: CA
+    lat: 50.1163
+    lon: -122.9574
+    base_elevation_m: 675
+    summit_elevation_m: 2182
+    airport: YVR
+    ground: Skylynx coach YVR -> Whistler
+    lodging_band_usd_pp_night: [120, 190]
+    min_days: 5
+    ideal_days: 7
+    pass_verify: true
+  - id: revelstoke
+    name: Revelstoke
+    region: CA
+    lat: 50.9583
+    lon: -118.1637
+    base_elevation_m: 512
+    summit_elevation_m: 2225
+    airport: YLW
+    ground: Rental car YLW -> Revelstoke (~2.5h)
+    lodging_band_usd_pp_night: [100, 160]
+    min_days: 5
+    ideal_days: 7
+    pass_verify: true
+  - id: banff
+    name: Banff / Lake Louise
+    region: CA
+    lat: 51.4419
+    lon: -116.1553
+    base_elevation_m: 1645
+    summit_elevation_m: 2637
+    airport: YYC
+    ground: Banff Airporter YYC -> Banff
+    lodging_band_usd_pp_night: [110, 170]
+    min_days: 5
+    ideal_days: 7
+    pass_verify: true
+  - id: fernie
+    name: Fernie Alpine Resort
+    region: CA
+    lat: 49.4627
+    lon: -115.0872
+    base_elevation_m: 1082
+    summit_elevation_m: 1925
+    airport: YYC
+    ground: Rental car YYC -> Fernie (~3h)
+    lodging_band_usd_pp_night: [90, 140]
+    min_days: 5
+    ideal_days: 7
+    pass_verify: true
+  - id: jackson
+    name: Jackson Hole
+    region: US
+    lat: 43.5875
+    lon: -110.8279
+    base_elevation_m: 1924
+    summit_elevation_m: 3185
+    airport: JAC
+    ground: Shuttle JAC -> Teton Village
+    lodging_band_usd_pp_night: [140, 220]
+    min_days: 4
+    ideal_days: 6
+    pass_verify: true
+  - id: big-sky
+    name: Big Sky
+    region: US
+    lat: 45.2861
+    lon: -111.4014
+    base_elevation_m: 2286
+    summit_elevation_m: 3403
+    airport: BZN
+    ground: Shuttle BZN -> Big Sky
+    lodging_band_usd_pp_night: [130, 200]
+    min_days: 4
+    ideal_days: 6
+    pass_verify: true
+  - id: alta-snowbird
+    name: Alta / Snowbird
+    region: US
+    lat: 40.5883
+    lon: -111.6383
+    base_elevation_m: 2600
+    summit_elevation_m: 3353
+    airport: SLC
+    ground: Canyon shuttle SLC -> LCC
+    lodging_band_usd_pp_night: [120, 190]
+    min_days: 4
+    ideal_days: 6
+    pass_verify: true
+  - id: palisades
+    name: Palisades Tahoe
+    region: US
+    lat: 39.1967
+    lon: -120.2356
+    base_elevation_m: 1890
+    summit_elevation_m: 2760
+    airport: RNO
+    ground: Rental car RNO -> Olympic Valley (~1h)
+    lodging_band_usd_pp_night: [110, 180]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+  - id: chamonix
+    name: Chamonix
+    region: EU
+    lat: 45.9237
+    lon: 6.8694
+    base_elevation_m: 1035
+    summit_elevation_m: 3842
+    airport: GVA
+    ground: Shared transfer GVA -> Chamonix (~1.5h)
+    lodging_band_usd_pp_night: [110, 180]
+    min_days: 7
+    ideal_days: 9
+    pass_verify: true
+  - id: zermatt
+    name: Zermatt
+    region: EU
+    lat: 46.0207
+    lon: 7.7491
+    base_elevation_m: 1620
+    summit_elevation_m: 3883
+    airport: ZRH
+    ground: Train ZRH -> Zermatt (car-free village)
+    lodging_band_usd_pp_night: [140, 220]
+    min_days: 7
+    ideal_days: 9
+    pass_verify: true
+  - id: st-anton
+    name: St. Anton am Arlberg
+    region: EU
+    lat: 47.1287
+    lon: 10.2683
+    base_elevation_m: 1304
+    summit_elevation_m: 2811
+    airport: ZRH
+    ground: Train ZRH -> St. Anton
+    lodging_band_usd_pp_night: [120, 190]
+    min_days: 7
+    ideal_days: 9
+    pass_verify: true

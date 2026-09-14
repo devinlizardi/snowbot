@@ -1,0 +1,14 @@
+services:
+  snowbot:
+    build: .
+    image: snowbot:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Jobs refuse to touch the real channel unless this says so.
+      SNOWBOT_CHANNEL: ${SNOWBOT_CHANNEL:-test}
+      SNOWBOT_DB_PATH: /app/data/snowbot.sqlite
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp.json
+    volumes:
+      - ./data:/app/data
+      - ./secrets/gcp.json:/run/secrets/gcp.json:ro
