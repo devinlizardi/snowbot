@@ -1,3 +1,4 @@
+import './env.js'; // must come first: reads .env into process.env
 import { parseArgs, runJob, type Job } from './jobs/_runner.js';
 import { aspenUpdateJob } from './jobs/aspenUpdate.js';
 import { expeditionBuildJob } from './jobs/expeditionBuild.js';

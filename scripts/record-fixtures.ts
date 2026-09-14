@@ -10,6 +10,7 @@
  * Re-run it whenever a source starts behaving oddly — a diff in these files is
  * usually the explanation.
  */
+import '../src/env.js'; // must come first: reads .env into process.env
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ARCHIVE_URL, FORECAST_URL, SEASONAL_URL, getJson } from '../src/sources/weather/openMeteo.js';

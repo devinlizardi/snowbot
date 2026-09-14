@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deepMerge, loadConfig, requireSecret } from '../src/config.js';
+import {
+  assertSnowflake,
+  deepMerge,
+  loadConfig,
+  optionalSecret,
+  requireSecret,
+  stripInlineComment,
+} from '../src/config.js';
+import { loadEnv } from '../src/env.js';
 
 describe('deepMerge', () => {
   it('merges nested objects and replaces arrays wholesale', () => {
@@ -91,5 +99,65 @@ describe('loadConfig', () => {
 describe('requireSecret', () => {
   it('names the missing variable', () => {
     expect(() => requireSecret('NOPE', {})).toThrow(/NOPE/);
+  });
+});
+
+describe('stripInlineComment', () => {
+  it('drops the alignment comment docker compose leaves on a .env value', () => {
+    expect(stripInlineComment('260572317921443840   # dev guild')).toBe('260572317921443840');
+  });
+
+  it('leaves a value that merely contains a hash alone', () => {
+    expect(stripInlineComment('sk-ant-a#b')).toBe('sk-ant-a#b');
+  });
+
+  it('treats an empty or comment-only value as unset', () => {
+    expect(stripInlineComment('   # nothing here')).toBeUndefined();
+    expect(stripInlineComment('  ')).toBeUndefined();
+    expect(stripInlineComment(undefined)).toBeUndefined();
+  });
+
+  it('reaches the ids and secrets that loadConfig hands out', () => {
+    const env = {
+      DISCORD_TEST_GUILD_ID: '260572317921443840   # dev guild',
+      DISCORD_TEST_CHANNEL_ID: '1547643758710104124',
+      SERPAPI_KEY: 'abc   # the paid one',
+    };
+    expect(loadConfig({ env }).channels.test.guildId).toBe('260572317921443840');
+    expect(requireSecret('SERPAPI_KEY', env)).toBe('abc');
+    expect(optionalSecret('NOPE', env)).toBeUndefined();
+  });
+});
+
+describe('assertSnowflake', () => {
+  it('accepts a Discord id and names the variable when it rejects one', () => {
+    expect(assertSnowflake('260572317921443840', 'DISCORD_TEST_GUILD_ID')).toBe(
+      '260572317921443840',
+    );
+    expect(() => assertSnowflake('260572317921443840 # dev guild', 'DISCORD_TEST_GUILD_ID')).toThrow(
+      /DISCORD_TEST_GUILD_ID is not a Discord id/,
+    );
+    expect(() => assertSnowflake('tg', 'DISCORD_GUILD_ID')).toThrow(/17–20 digits/);
+  });
+});
+
+describe('loadEnv', () => {
+  it('reads a .env file, strips inline comments and never clobbers the real env', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'snowbot-env-'));
+    const file = join(dir, '.env');
+    writeFileSync(file, 'SNOWBOT_TEST_ID=260572317921443840   # dev guild\nSNOWBOT_TEST_SET=fromfile\n');
+    process.env.SNOWBOT_TEST_SET = 'fromenv';
+    try {
+      expect(loadEnv(file)).toBe(file);
+      expect(process.env.SNOWBOT_TEST_ID).toBe('260572317921443840');
+      expect(process.env.SNOWBOT_TEST_SET).toBe('fromenv');
+    } finally {
+      delete process.env.SNOWBOT_TEST_ID;
+      delete process.env.SNOWBOT_TEST_SET;
+    }
+  });
+
+  it('is a no-op when there is no file', () => {
+    expect(loadEnv(join(tmpdir(), 'snowbot-does-not-exist', '.env'))).toBeUndefined();
   });
 });

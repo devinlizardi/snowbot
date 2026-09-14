@@ -13,6 +13,7 @@
  * a ridge into one number, so a few hundred metres is normal. Hundreds of km,
  * or a delta above ~800 m, is a real error.
  */
+import '../src/env.js'; // must come first: reads .env into process.env
 import { loadConfig } from '../src/config.js';
 import { FORECAST_URL, getJson } from '../src/sources/weather/openMeteo.js';
 

@@ -192,6 +192,38 @@ export function deepMerge<T>(base: T, override: unknown): T {
   return out as T;
 }
 
+/* ------------------------------------------------------------ env values */
+
+/**
+ * A value read from a `.env` file can arrive with the alignment comment still
+ * attached: docker compose's `env_file:` hands `260572317921443840   # dev
+ * guild` through verbatim, and Discord answers an id like that with an opaque
+ * `50035 Invalid Form Body`. Node's own `.env` parser strips it, compose's does
+ * not, so strip it once here and no caller has to know which loaded the file.
+ *
+ * Only whitespace-then-`#` counts, so a value that merely contains a `#` is
+ * left alone. An empty result is treated as unset.
+ */
+export function stripInlineComment(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const v = raw.replace(/\s+#[^\n]*$/, '').trim();
+  return v || undefined;
+}
+
+const SNOWFLAKE = /^\d{17,20}$/;
+
+/** Fail on a malformed Discord id here, with the name of the variable that
+ *  holds it, rather than as a 400 from the API several calls later. */
+export function assertSnowflake(value: string, label: string): string {
+  if (!SNOWFLAKE.test(value)) {
+    throw new Error(
+      `${label} is not a Discord id: ${JSON.stringify(value)} — expected 17–20 digits ` +
+        `and nothing else (a trailing "# comment" in .env is the usual cause)`,
+    );
+  }
+  return value;
+}
+
 /* -------------------------------------------------------------------- load */
 
 export type LoadOptions = {
@@ -221,7 +253,7 @@ export function loadConfig(opts: LoadOptions = {}): Config {
 
   const members: Member[] = cfg.roster.map((m) => ({
     name: m.name,
-    discordId: m.discord_id_env ? env[m.discord_id_env] || undefined : undefined,
+    discordId: m.discord_id_env ? stripInlineComment(env[m.discord_id_env]) : undefined,
     airports: m.airports,
     pricedAirports: m.price_all ? m.airports : m.airports.slice(0, 1),
   }));
@@ -232,17 +264,17 @@ export function loadConfig(opts: LoadOptions = {}): Config {
     members,
     channels: {
       real: {
-        guildId: env[cfg.discord.guild_id_env],
-        channelId: env[cfg.discord.channel_id_env],
+        guildId: stripInlineComment(env[cfg.discord.guild_id_env]),
+        channelId: stripInlineComment(env[cfg.discord.channel_id_env]),
       },
       test: {
-        guildId: env[cfg.discord.test_guild_id_env],
-        channelId: env[cfg.discord.test_channel_id_env],
+        guildId: stripInlineComment(env[cfg.discord.test_guild_id_env]),
+        channelId: stripInlineComment(env[cfg.discord.test_channel_id_env]),
       },
     },
     bigquery: {
-      projectId: env[cfg.weather.bigquery.project_id_env],
-      datasetId: env[cfg.weather.bigquery.dataset_id_env],
+      projectId: stripInlineComment(env[cfg.weather.bigquery.project_id_env]),
+      datasetId: stripInlineComment(env[cfg.weather.bigquery.dataset_id_env]),
       table: cfg.weather.bigquery[tableKey],
     },
   };
@@ -253,11 +285,11 @@ export function loadConfig(opts: LoadOptions = {}): Config {
 /** Secrets are read at point of use, never at boot, so a dry run of one job
  *  doesn't demand keys belonging to a different job. */
 export function requireSecret(name: string, env: NodeJS.ProcessEnv = process.env): string {
-  const v = env[name];
+  const v = stripInlineComment(env[name]);
   if (!v) throw new Error(`missing required secret ${name} — set it in .env (never in config.yaml)`);
   return v;
 }
 
 export function optionalSecret(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env[name] || undefined;
+  return stripInlineComment(env[name]);
 }

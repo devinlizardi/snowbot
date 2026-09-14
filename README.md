@@ -22,6 +22,11 @@ That last command is the health check: it loads `config.yaml`, migrates the
 database, connects to Discord if `DISCORD_BOT_TOKEN` is set, and prints what it
 found. It never posts.
 
+`.env` is read by `src/env.ts`, which every entry point imports first; a real
+environment variable always wins over the file. In the container the same
+variables arrive through compose's `env_file:` instead — that loader keeps
+whatever follows the `=`, so comments in `.env` belong on their own line.
+
 ```
 pnpm typecheck     # tsc --noEmit
 pnpm test          # vitest, fixtures only — no live network

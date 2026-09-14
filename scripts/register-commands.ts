@@ -8,7 +8,8 @@
  * show up in every server the bot is in, so we never use them. Re-running
  * replaces the whole set for that guild — removed commands disappear.
  */
-import { loadConfig, requireSecret } from '../src/config.js';
+import '../src/env.js'; // must come first: reads .env into process.env
+import { assertSnowflake, loadConfig, requireSecret } from '../src/config.js';
 import { COMMANDS, registerCommands } from '../src/discord/commands.js';
 
 const args = process.argv.slice(2);
@@ -22,11 +23,17 @@ if (target !== 'test' && target !== 'real') {
 }
 
 const cfg = loadConfig();
+const guildIdEnv =
+  target === 'real' ? cfg.discord.guild_id_env : cfg.discord.test_guild_id_env;
 const guildId = cfg.channels[target].guildId;
 if (!guildId) {
-  console.error(
-    `no guild id for "${target}" — set ${target === 'real' ? cfg.discord.guild_id_env : cfg.discord.test_guild_id_env} in .env`,
-  );
+  console.error(`no guild id for "${target}" — set ${guildIdEnv} in .env`);
+  process.exit(1);
+}
+try {
+  assertSnowflake(guildId, guildIdEnv);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 }
 
