@@ -1,0 +1,40 @@
+name: deploy
+
+# Push to main → ci must be green → SSH to the droplet and roll the container.
+# The droplet pulls the repo itself, so nothing secret leaves GitHub except the
+# SSH key, and the image is built where it runs.
+on:
+  workflow_run:
+    workflows: [ci]
+    branches: [main]
+    types: [completed]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Roll the droplet
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          # The unprivileged user deploy/bootstrap.sh creates — never root.
+          username: ${{ secrets.DROPLET_USER }}
+          # DROPLET_SSH_KEY MUST be a fresh keypair generated for this workflow
+          # (`ssh-keygen -t ed25519 -C snowbot-deploy -f snowbot-deploy`), with
+          # only the public half in /home/deploy/.ssh/authorized_keys. Do NOT
+          # reuse the personal `snowbot` key: it would hand GitHub a credential
+          # that also opens Devin's other boxes, and rotating it later would
+          # mean rotating his own login.
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/snowbot
+            git pull --ff-only
+            docker compose build
+            docker compose up -d
+            docker image prune -f

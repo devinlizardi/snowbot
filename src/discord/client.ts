@@ -53,6 +53,11 @@ export class Poster {
     return this.cfg.channels[this.opts.target].guildId;
   }
 
+  /** True once logged in. Offline, callers can't verify anything and should trust their records. */
+  get connected(): boolean {
+    return this.client !== null;
+  }
+
   /**
    * Log in. Returns false when no token is configured — a dry run is still
    * useful without one, so this is a warning rather than a failure.

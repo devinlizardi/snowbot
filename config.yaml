@@ -48,13 +48,27 @@ roster:
     price_all: false
 
 aspen:
-  name: Aspen Snowmass
+  # "Aspen Snowmass" is four separate mountains — Snowmass, Aspen Mountain
+  # (Ajax), Aspen Highlands, Buttermilk — roughly 12 km apart, differing by
+  # ~50 m at the base and ~400 m at the summit. Forecasting "Aspen" as one
+  # point is wrong, so this models SNOWMASS: the biggest, the most skied, and
+  # where a group of five is most likely to be staying. If the trip ends up
+  # based on Ajax instead, change these coordinates, not the code.
+  #
+  # Verified against Wikipedia's ski-area infoboxes, Sept 2026:
+  #   Snowmass      base 8,104 ft / 2,470 m   top 12,510 ft / 3,813 m
+  #   Aspen Mtn     base 7,945 ft / 2,422 m   top 11,212 ft / 3,417 m
+  name: Aspen Snowmass — Snowmass Mountain
   window_start: 2027-01-24
   window_end: 2027-01-30
-  lat: 39.2084
-  lon: -106.9490
-  base_elevation_m: 2422
-  summit_elevation_m: 3813
+  base:
+    lat: 39.2097
+    lon: -106.9489
+    elevation_m: 2470
+  summit:
+    lat: 39.1856
+    lon: -106.9653
+    elevation_m: 3813
   airports: [ASE, EGE, DEN] # in order of convenience, not price
   cadence:
     monthly_from: 2026-10-01
@@ -104,6 +118,10 @@ expedition:
     domestic: 1400
   repeat_cooldown_weeks: 4
   arrival_window_hours: 6
+  # The builder never proposes a window outside this span (MM-DD, wraps the year).
+  season:
+    start: 12-01
+    end: 04-15
   ranking_weights:
     forecast_snow_10d_confidence_weighted: 0.45
     observed_snow_7d: 0.20

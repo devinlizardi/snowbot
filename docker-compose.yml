@@ -3,12 +3,21 @@ services:
     build: .
     image: snowbot:local
     restart: unless-stopped
+    # Long-running: in-process cron + gateway for slash commands + healthz.
+    # One-off jobs: `docker compose run --rm snowbot job=<name> --dry-run`.
+    command: ['serve']
     env_file: .env
     environment:
       # Jobs refuse to touch the real channel unless this says so.
       SNOWBOT_CHANNEL: ${SNOWBOT_CHANNEL:-test}
+      # 1 = every scheduled tick is a dry run. Leave on for the first week.
+      SNOWBOT_DRY_RUN: ${SNOWBOT_DRY_RUN:-0}
       SNOWBOT_DB_PATH: /app/data/snowbot.sqlite
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp.json
+      PORT: 8080
+    ports:
+      # Loopback only — healthz is for docker and `curl` on the box, not the internet.
+      - '127.0.0.1:8080:8080'
     volumes:
       - ./data:/app/data
       - ./secrets/gcp.json:/run/secrets/gcp.json:ro

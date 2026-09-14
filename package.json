@@ -9,6 +9,8 @@
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "serve": "tsx src/index.ts serve",
+    "register-commands": "tsx scripts/register-commands.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",

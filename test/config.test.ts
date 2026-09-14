@@ -45,6 +45,22 @@ describe('loadConfig', () => {
     expect(by('Hagen').pricedAirports).toEqual(['SFO']);
   });
 
+  it('models Aspen as two distinct points with the summit above the base', () => {
+    const cfg = loadConfig({ env: {} });
+    expect(cfg.aspen.summit.elevation_m).toBeGreaterThan(cfg.aspen.base.elevation_m);
+    // The two points must actually be different places, or "summit forecast"
+    // is just the base forecast with a different label.
+    expect(cfg.aspen.summit.lat).not.toBe(cfg.aspen.base.lat);
+    expect(cfg.aspen.summit.lon).not.toBe(cfg.aspen.base.lon);
+  });
+
+  it('rejects a summit that is not above the base', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'snowbot-cfg-'));
+    const local = join(dir, 'config.local.yaml');
+    writeFileSync(local, 'aspen:\n  summit:\n    elevation_m: 100\n');
+    expect(() => loadConfig({ localPath: local, env: {} })).toThrow(/summit is not above base/);
+  });
+
   it('keeps the board internally consistent', () => {
     const cfg = loadConfig({ env: {} });
     for (const d of cfg.board) {

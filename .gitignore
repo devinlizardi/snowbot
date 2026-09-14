@@ -170,3 +170,4 @@ data/
 *.sqlite-wal
 *.sqlite-shm
 test/.tmp/
+.claude/

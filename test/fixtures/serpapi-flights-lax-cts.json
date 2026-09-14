@@ -1,0 +1,169 @@
+{
+  "search_metadata": {
+    "id": "fixture",
+    "status": "Success",
+    "created_at": "2026-09-14 12:00:00 UTC"
+  },
+  "search_parameters": {
+    "engine": "google_flights",
+    "departure_id": "LAX",
+    "arrival_id": "CTS",
+    "outbound_date": "2027-02-06",
+    "return_date": "2027-02-16",
+    "currency": "USD",
+    "type": "1"
+  },
+  "best_flights": [
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Los Angeles International Airport",
+            "id": "LAX",
+            "time": "2027-02-06 12:55"
+          },
+          "arrival_airport": {
+            "name": "Tokyo Haneda Airport",
+            "id": "HND",
+            "time": "2027-02-07 17:30"
+          },
+          "duration": 695,
+          "airplane": "Boeing 787",
+          "airline": "ANA",
+          "travel_class": "Economy",
+          "flight_number": "NH 105",
+          "legroom": "34 in"
+        },
+        {
+          "departure_airport": {
+            "name": "Tokyo Haneda Airport",
+            "id": "HND",
+            "time": "2027-02-07 19:30"
+          },
+          "arrival_airport": {
+            "name": "New Chitose Airport",
+            "id": "CTS",
+            "time": "2027-02-07 21:05"
+          },
+          "duration": 95,
+          "airplane": "Boeing 777",
+          "airline": "ANA",
+          "travel_class": "Economy",
+          "flight_number": "NH 79"
+        }
+      ],
+      "layovers": [{ "duration": 120, "name": "Tokyo Haneda Airport", "id": "HND" }],
+      "total_duration": 910,
+      "carbon_emissions": {
+        "this_flight": 812000,
+        "typical_for_this_route": 790000,
+        "difference_percent": 3
+      },
+      "price": 1184,
+      "type": "Round trip",
+      "departure_token": "fixture-token-1"
+    }
+  ],
+  "other_flights": [
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Los Angeles International Airport",
+            "id": "LAX",
+            "time": "2027-02-06 00:40"
+          },
+          "arrival_airport": {
+            "name": "Incheon International Airport",
+            "id": "ICN",
+            "time": "2027-02-07 06:10"
+          },
+          "duration": 810,
+          "airline": "Korean Air",
+          "flight_number": "KE 12"
+        },
+        {
+          "departure_airport": {
+            "name": "Incheon International Airport",
+            "id": "ICN",
+            "time": "2027-02-07 09:50"
+          },
+          "arrival_airport": {
+            "name": "New Chitose Airport",
+            "id": "CTS",
+            "time": "2027-02-07 12:40"
+          },
+          "duration": 170,
+          "airline": "Korean Air",
+          "flight_number": "KE 795"
+        }
+      ],
+      "layovers": [{ "duration": 220, "name": "Incheon International Airport", "id": "ICN" }],
+      "total_duration": 1200,
+      "price": 968,
+      "type": "Round trip",
+      "departure_token": "fixture-token-2"
+    },
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Los Angeles International Airport",
+            "id": "LAX",
+            "time": "2027-02-06 11:10"
+          },
+          "arrival_airport": {
+            "name": "Narita International Airport",
+            "id": "NRT",
+            "time": "2027-02-07 15:40"
+          },
+          "duration": 690,
+          "airline": "United",
+          "flight_number": "UA 32"
+        },
+        {
+          "departure_airport": {
+            "name": "Narita International Airport",
+            "id": "NRT",
+            "time": "2027-02-07 18:15"
+          },
+          "arrival_airport": {
+            "name": "New Chitose Airport",
+            "id": "CTS",
+            "time": "2027-02-07 19:55"
+          },
+          "duration": 100,
+          "airline": "ANA",
+          "flight_number": "NH 2159"
+        }
+      ],
+      "layovers": [{ "duration": 155, "name": "Narita International Airport", "id": "NRT" }],
+      "total_duration": 945,
+      "price": 1302,
+      "type": "Round trip",
+      "departure_token": "fixture-token-3"
+    },
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Los Angeles International Airport",
+            "id": "LAX",
+            "time": "2027-02-06 13:00"
+          },
+          "arrival_airport": {
+            "name": "New Chitose Airport",
+            "id": "CTS",
+            "time": "2027-02-07 18:00"
+          }
+        }
+      ],
+      "type": "Round trip"
+    }
+  ],
+  "price_insights": {
+    "lowest_price": 968,
+    "price_level": "typical",
+    "typical_price_range": [900, 1400]
+  }
+}

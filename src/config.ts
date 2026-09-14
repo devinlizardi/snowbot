@@ -14,6 +14,13 @@ const MemberSchema = z.object({
   price_all: z.boolean().default(false),
 });
 
+/** A forecast point: where to ask, and how high it is there. */
+const PointSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  elevation_m: z.number().int(),
+});
+
 const DestinationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -50,10 +57,8 @@ const ConfigSchema = z
       name: z.string(),
       window_start: isoDate,
       window_end: isoDate,
-      lat: z.number(),
-      lon: z.number(),
-      base_elevation_m: z.number().int(),
-      summit_elevation_m: z.number().int(),
+      base: PointSchema,
+      summit: PointSchema,
       airports: z.array(z.string()),
       cadence: z.object({
         monthly_from: isoDate,
@@ -109,6 +114,14 @@ const ConfigSchema = z
       }),
       repeat_cooldown_weeks: z.number().int().positive(),
       arrival_window_hours: z.number().positive(),
+      // Windows are only ever proposed inside the riding season. MM-DD, and the
+      // end may wrap past New Year (12-01 → 04-15 is the default).
+      season: z
+        .object({
+          start: z.string().regex(/^\d{2}-\d{2}$/, 'expected MM-DD').default('12-01'),
+          end: z.string().regex(/^\d{2}-\d{2}$/, 'expected MM-DD').default('04-15'),
+        })
+        .default({ start: '12-01', end: '04-15' }),
       ranking_weights: z.object({
         forecast_snow_10d_confidence_weighted: z.number(),
         observed_snow_7d: z.number(),
@@ -136,10 +149,14 @@ const ConfigSchema = z
     if (cfg.aspen.window_end < cfg.aspen.window_start) {
       ctx.addIssue({ code: 'custom', path: ['aspen'], message: 'window_end precedes window_start' });
     }
+    if (cfg.aspen.summit.elevation_m <= cfg.aspen.base.elevation_m) {
+      ctx.addIssue({ code: 'custom', path: ['aspen'], message: 'summit is not above base' });
+    }
   });
 
 export type RawConfig = z.infer<typeof ConfigSchema>;
 export type Destination = z.infer<typeof DestinationSchema>;
+export type Point = z.infer<typeof PointSchema>;
 
 /** A roster member with env indirection already resolved. */
 export type Member = {
