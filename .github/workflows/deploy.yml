@@ -21,7 +21,7 @@ jobs:
       - name: Roll the droplet
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.DROPLET_HOST }}
+          host: ${{ secrets.DROPLET_IP }}
           # The unprivileged user deploy/bootstrap.sh creates — never root.
           username: ${{ secrets.DROPLET_USER }}
           # DROPLET_SSH_KEY MUST be a fresh keypair generated for this workflow
@@ -31,8 +31,11 @@ jobs:
           # that also opens Devin's other boxes, and rotating it later would
           # mean rotating his own login.
           key: ${{ secrets.DROPLET_SSH_KEY }}
-          script_stop: true
+          # `script_stop` was dropped in ssh-action@v1 (it warns and ignores it),
+          # so the script aborts on the first failure itself. Without this a
+          # rejected `git pull` would still go on to rebuild the old tree.
           script: |
+            set -euo pipefail
             cd /opt/snowbot
             git pull --ff-only
             docker compose build

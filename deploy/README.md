@@ -42,7 +42,7 @@ channel has to be asked for by name.
    ssh root@<droplet> 'cat >> /home/deploy/.ssh/authorized_keys' < snowbot-deploy.pub
    ```
    Then in GitHub → Settings → Secrets and variables → Actions:
-   `DROPLET_HOST` = the IP, `DROPLET_USER` = `deploy`, `DROPLET_SSH_KEY` =
+   `DROPLET_IP` = the IP, `DROPLET_USER` = `deploy`, `DROPLET_SSH_KEY` =
    the contents of `snowbot-deploy` (private half). The personal `snowbot`
    key is gitignored and must never be pasted into a secret.
 4. **Secrets, by hand.** From your laptop, as `deploy` with the new key (or

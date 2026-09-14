@@ -124,7 +124,7 @@ bootstrap done. Remaining steps are manual on purpose — they all involve secre
      (the account is created with an empty authorized_keys):
        cat snowbot-deploy.pub >> /home/$DEPLOY_USER/.ssh/authorized_keys
      Then put the private half in the repo's DROPLET_SSH_KEY secret, the
-     droplet's IP in DROPLET_HOST, and "$DEPLOY_USER" in DROPLET_USER.
+     droplet's IP in DROPLET_IP, and "$DEPLOY_USER" in DROPLET_USER.
 
   2. Copy the filled-in .env (as $DEPLOY_USER with that key, or as root then chown to $DEPLOY_USER):
        scp .env $DEPLOY_USER@<droplet>:$APP_DIR/.env
