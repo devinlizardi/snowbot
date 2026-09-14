@@ -119,22 +119,23 @@ cat <<EOF
 
 bootstrap done. Remaining steps are manual on purpose — they all involve secrets:
 
-  1. Copy the filled-in .env:
+  1. Add the *fresh* deploy public key (not your personal snowbot key) so
+     GitHub Actions — and you, below — can SSH in as $DEPLOY_USER
+     (the account is created with an empty authorized_keys):
+       cat snowbot-deploy.pub >> /home/$DEPLOY_USER/.ssh/authorized_keys
+     Then put the private half in the repo's DROPLET_SSH_KEY secret, the
+     droplet's IP in DROPLET_HOST, and "$DEPLOY_USER" in DROPLET_USER.
+
+  2. Copy the filled-in .env (as $DEPLOY_USER with that key, or as root then chown to $DEPLOY_USER):
        scp .env $DEPLOY_USER@<droplet>:$APP_DIR/.env
        chmod 0600 $APP_DIR/.env
      Set SNOWBOT_CHANNEL=real in it only once the test channel has been quiet
      for a full week.
 
-  2. Place the GCP service-account key:
+  3. Place the GCP service-account key:
        scp gcp.json $DEPLOY_USER@<droplet>:$APP_DIR/secrets/gcp.json
        chmod 0400 $APP_DIR/secrets/gcp.json
      Nothing else goes in secrets/.
-
-  3. Add the *fresh* deploy public key (not your personal snowbot key) so
-     GitHub Actions can SSH in:
-       cat snowbot-deploy.pub >> /home/$DEPLOY_USER/.ssh/authorized_keys
-     Then put the private half in the repo's DROPLET_SSH_KEY secret, the
-     droplet's IP in DROPLET_HOST, and "$DEPLOY_USER" in DROPLET_USER.
 
   4. First run, as $DEPLOY_USER:
        cd $APP_DIR && docker compose build

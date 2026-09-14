@@ -34,23 +34,25 @@ channel has to be asked for by name.
    ```
    It is idempotent; re-run it if something fails halfway. It ends by printing
    the manual steps, repeated here.
-3. **Secrets, by hand.** From your laptop:
-   ```bash
-   scp .env deploy@<droplet>:/opt/snowbot/.env
-   scp gcp.json deploy@<droplet>:/opt/snowbot/secrets/gcp.json
-   ssh deploy@<droplet> 'chmod 0600 /opt/snowbot/.env && chmod 0400 /opt/snowbot/secrets/gcp.json'
-   ```
-   Leave `SNOWBOT_CHANNEL=test` for now.
-4. **Deploy keypair — fresh, not your personal one.**
+3. **Deploy keypair — fresh, not your personal one.** The `deploy` user is
+   created with an empty `authorized_keys`, so this has to happen before
+   anything is copied as `deploy@`.
    ```bash
    ssh-keygen -t ed25519 -C snowbot-deploy -f snowbot-deploy -N ''
    ssh root@<droplet> 'cat >> /home/deploy/.ssh/authorized_keys' < snowbot-deploy.pub
    ```
    Then in GitHub → Settings → Secrets and variables → Actions:
    `DROPLET_HOST` = the IP, `DROPLET_USER` = `deploy`, `DROPLET_SSH_KEY` =
-   the contents of `snowbot-deploy` (private half). Delete the local private
-   file afterwards; GitHub is the only place it should live. The personal
-   `snowbot` key is gitignored and must never be pasted into a secret.
+   the contents of `snowbot-deploy` (private half). The personal `snowbot`
+   key is gitignored and must never be pasted into a secret.
+4. **Secrets, by hand.** From your laptop, as `deploy` with the new key (or
+   as root, then `chown -R deploy:deploy /opt/snowbot/.env /opt/snowbot/secrets`):
+   ```bash
+   scp -i snowbot-deploy .env deploy@<droplet>:/opt/snowbot/.env
+   scp -i snowbot-deploy gcp.json deploy@<droplet>:/opt/snowbot/secrets/gcp.json
+   ssh -i snowbot-deploy deploy@<droplet> 'chmod 0600 /opt/snowbot/.env && chmod 0400 /opt/snowbot/secrets/gcp.json'
+   ```
+   Leave `SNOWBOT_CHANNEL=test` for now.
 5. **First run.**
    ```bash
    ssh deploy@<droplet>
