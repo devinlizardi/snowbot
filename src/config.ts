@@ -35,6 +35,19 @@ const DestinationSchema = z.object({
   min_days: z.number().int().positive(),
   ideal_days: z.number().int().positive(),
   pass_verify: z.boolean().default(true),
+  /**
+   * What makes the place worth the flight, in the group's terms. Hand-written,
+   * public, and the only colour the dossier writer gets — it must never be
+   * where a price or a snow total comes from.
+   */
+  pitch: z
+    .object({
+      hook: z.string().default(''),
+      terrain: z.array(z.string()).default([]),
+      off_snow: z.array(z.string()).default([]),
+      heads_up: z.array(z.string()).default([]),
+    })
+    .default({ hook: '', terrain: [], off_snow: [], heads_up: [] }),
 });
 
 const ConfigSchema = z
@@ -85,7 +98,16 @@ const ConfigSchema = z
         forecast: z.number().int().positive(),
         archive: z.number().int().positive(),
         seasonal: z.number().int().positive(),
+        // A finished season never changes; a year is only so the row can age out.
+        climatology: z.number().int().positive().default(525_600),
       }),
+      climatology: z
+        .object({
+          seasons: z.number().int().min(5).max(40).default(20),
+          snow_day_cm: z.number().positive().default(2),
+          pace_ms: z.number().int().min(0).default(1500),
+        })
+        .default({ seasons: 20, snow_day_cm: 2, pace_ms: 1500 }),
     }),
 
     flights: z.object({
@@ -99,6 +121,10 @@ const ConfigSchema = z
       provider: z.literal('serpapi'),
       min_sleeps: z.number().int().positive(),
       cache_ttl_hours: z.number().int().positive(),
+      // Google prices a hotel per room and never says how many it sleeps.
+      hotel_guests_per_room: z.number().int().positive().default(2),
+      // Also search whole-place rentals; costs one more SerpApi search per build.
+      search_rentals: z.boolean().default(true),
     }),
 
     llm: z.object({
@@ -123,6 +149,7 @@ const ConfigSchema = z
         })
         .default({ start: '12-01', end: '04-15' }),
       ranking_weights: z.object({
+        historical_snow: z.number(),
         forecast_snow_10d_confidence_weighted: z.number(),
         observed_snow_7d: z.number(),
         cost: z.number(),
@@ -134,7 +161,12 @@ const ConfigSchema = z
   })
   .superRefine((cfg, ctx) => {
     const w = cfg.expedition.ranking_weights;
-    const sum = w.forecast_snow_10d_confidence_weighted + w.observed_snow_7d + w.cost + w.logistics_ease;
+    const sum =
+      w.historical_snow +
+      w.forecast_snow_10d_confidence_weighted +
+      w.observed_snow_7d +
+      w.cost +
+      w.logistics_ease;
     if (Math.abs(sum - 1) > 1e-6) {
       ctx.addIssue({ code: 'custom', path: ['expedition', 'ranking_weights'], message: `weights must sum to 1, got ${sum}` });
     }

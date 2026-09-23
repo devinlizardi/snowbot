@@ -4,6 +4,8 @@ import {
   AIRFARE_PRIOR_USD,
   ceilingFor,
   estimateCostForRanking,
+  HISTORY_UNKNOWN,
+  historicalScore,
   logisticsEaseFor,
   rankBoard,
   scoreDestination,
@@ -40,8 +42,15 @@ describe('scoreDestination', () => {
     ['a big one, medium', 100, 'medium', 0.7],
     ['off the top of the reference, still capped', 250, 'high', 1],
   ])('snow term — %s', (_label, cm, conf, expectedSnowTerm) => {
-    const i = input(by('niseko'), { cm, conf, observed7dCm: 0, estCostPp: 2600, logisticsEase: 0 });
-    // Only the snow term is live: observed 0, cost at the ceiling, logistics 0.
+    const i = input(by('niseko'), {
+      cm,
+      conf,
+      observed7dCm: 0,
+      estCostPp: 2600,
+      logisticsEase: 0,
+      historical: 0,
+    });
+    // Only the snow term is live: history 0, observed 0, cost at the ceiling, logistics 0.
     expect(scoreDestination(i, W)).toBeCloseTo(
       W.forecast_snow_10d_confidence_weighted * expectedSnowTerm,
       3,
@@ -54,7 +63,7 @@ describe('scoreDestination', () => {
     expect(agreed).toBeGreaterThan(disputed);
   });
 
-  it('weights every term as PLAN §5 says', () => {
+  it('weights every term as PLAN §5 (Sept 2026) says', () => {
     const i = input(by('whistler'), {
       cm: 50,
       conf: 'high',
@@ -62,9 +71,37 @@ describe('scoreDestination', () => {
       estCostPp: 1300,
       ceilingUsd: 2600,
       logisticsEase: 0.9,
+      historical: 0.8,
     });
-    const expected = 0.45 * 0.5 + 0.2 * 0.5 + 0.2 * 0.5 + 0.15 * 0.9;
+    const expected = 0.4 * 0.8 + 0.15 * 0.5 + 0.1 * 0.5 + 0.2 * 0.5 + 0.15 * 0.9;
     expect(scoreDestination(i, W)).toBeCloseTo(expected, 3);
+  });
+
+  it('scores a destination with no history as middling, not as a bad place to go', () => {
+    const none = input(by('niseko'), { historical: null });
+    const middling = input(by('niseko'), { historical: HISTORY_UNKNOWN });
+    expect(scoreDestination(none, W)).toBe(scoreDestination(middling, W));
+  });
+
+  it('a snowy window beats a fresh storm somewhere that is usually dry then', () => {
+    const reliable = scoreDestination(input(by('niseko'), { cm: 10, conf: 'low', historical: 0.95 }), W);
+    const lucky = scoreDestination(input(by('whistler'), { cm: 90, conf: 'high', historical: 0.3 }), W);
+    expect(reliable).toBeGreaterThan(lucky);
+  });
+});
+
+describe('historicalScore', () => {
+  it('averages snow-day frequency with the resort month, each capped at 1', () => {
+    // 6 of 10 days is the full frequency score; 150cm of a 300cm reference is half.
+    expect(historicalScore({ typicalSnowDays: 6, windowDays: 10 }, { windowMonthCm: 150, annualCm: 900 })).toBe(0.75);
+    expect(historicalScore({ typicalSnowDays: 9, windowDays: 10 }, { windowMonthCm: 450, annualCm: null })).toBe(1);
+  });
+
+  it('falls back to the annual figure, then to whichever half exists, then null', () => {
+    expect(historicalScore(null, { windowMonthCm: null, annualCm: 600 })).toBe(0.5);
+    expect(historicalScore({ typicalSnowDays: 3, windowDays: 10 }, null)).toBe(0.5);
+    expect(historicalScore(null, null)).toBeNull();
+    expect(historicalScore(null, { windowMonthCm: null, annualCm: null })).toBeNull();
   });
 
   it('clips a cost above the ceiling to zero rather than going negative', () => {
@@ -111,7 +148,8 @@ describe('rankBoard', () => {
       NOW,
     );
     expect(r.ranked.map((x) => x.dest.id)).toEqual(['niseko', 'whistler', 'jackson']);
-    expect(r.ranked[0]!.reasons[0]).toBe('90cm forecast over 10 days, high confidence');
+    expect(r.ranked[0]!.reasons).toContain('90cm forecast over 10 days, high confidence');
+    expect(r.ranked[0]!.reasons[0]).toBe('no snow history');
     expect(r.nearMisses).toEqual([]);
   });
 

@@ -194,6 +194,22 @@ export class Poster {
     return thread.id;
   }
 
+  /** Edit a message that lives in a thread (a channel `editMessage` can't see into). */
+  async editThreadMessage(threadId: string, messageId: string, content: string): Promise<PostResult> {
+    if (this.opts.dryRun || !this.client) {
+      log.info('[dry-run] would edit thread message', { threadId, messageId, chars: content.length });
+      console.log(divider(`EDIT ${messageId} in ${threadId}`, this.opts.target), '\n' + content + '\n');
+      this.record('edit', messageId, content.slice(0, 200));
+      return { messageId, suppressed: false };
+    }
+    const ch = await this.client.channels.fetch(threadId);
+    if (!ch || !ch.isThread()) throw new Error(`${threadId} is not a thread`);
+    const msg = await (ch as ThreadChannel).messages.fetch(messageId);
+    await msg.edit({ content, allowedMentions: { parse: [] } });
+    this.record('edit', messageId, content.slice(0, 200));
+    return { messageId, suppressed: false };
+  }
+
   /** Thread replies are unbudgeted: they don't ping the channel. */
   async postThread(threadId: string | null, content: string): Promise<PostResult> {
     if (this.opts.dryRun || !this.client || !threadId) {

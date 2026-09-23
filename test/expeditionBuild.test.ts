@@ -7,23 +7,39 @@ import { LlmClient } from '../src/llm/client.js';
 import type { JobContext } from '../src/jobs/_runner.js';
 import {
   KV_BUILD_REQUEST,
+  kvDetailsKey,
   pickWindow,
   runExpeditionBuild,
   type ExpeditionBuildDeps,
   type SnowSignal,
 } from '../src/jobs/expeditionBuild.js';
 import {
+  composeCopy,
   DOSSIER_MAX_CHARS,
+  fallbackCopy,
   fallbackRender,
   headerLine,
+  renderDossier,
   renderDossierPrompt,
+  snowStory,
   trimForPrompt,
   unquotedNumbers,
+  type DossierCopy,
 } from '../src/llm/prompts/dossier.js';
 import { log } from '../src/logger.js';
 import type { FlightQuote, FlightSearch } from '../src/sources/flights.js';
 import type { LodgingOption, LodgingSearch } from '../src/sources/lodging.js';
-import type { GroundTransport, LookupResult, PassStatus } from '../src/sources/lookup.js';
+import type {
+  GroundTransport,
+  LookupResult,
+  PassStatus,
+  ResortSnow,
+} from '../src/sources/lookup.js';
+import {
+  seasonDates,
+  summarizeClimatology,
+  type Climatology,
+} from '../src/sources/weather/climatology.js';
 import { buildSnowReport } from '../src/sources/weather/consensus.js';
 import type { DailyWeather, ModelForecast } from '../src/sources/weather/types.js';
 
@@ -97,17 +113,81 @@ function model(name: string, start: string, snow: number[], dest: Destination): 
   };
 }
 
-const chalet: LodgingOption = {
-  name: 'Hirafu Pine Chalet',
-  type: 'vacation_rental',
-  totalUsd: 5670,
+function stay(
+  name: string,
+  totalUsd: number,
+  rating: number,
+  over: Partial<LodgingOption> = {},
+): LodgingOption {
+  return {
+    name,
+    type: 'vacation_rental',
+    totalUsd,
+    unitTotalUsd: totalUsd,
+    units: 1,
+    perNightUsd: totalUsd / 9,
+    perPersonPerNightUsd: Math.round((totalUsd / 9 / 5) * 100) / 100,
+    rating,
+    reviews: 38,
+    sleeps: 6,
+    bedrooms: 3,
+    highlights: [],
+    link: null,
+    url: `https://example.test/${name.toLowerCase().replace(/\W+/g, '-')}`,
+    source: 'serpapi',
+    ...over,
+  };
+}
+
+const chalet = stay('Hirafu Pine Chalet', 5670, 4.7, {
   perNightUsd: 630,
   perPersonPerNightUsd: 126,
-  rating: 4.7,
-  reviews: 38,
-  sleeps: 6,
+  highlights: ['hot tub', 'kitchen'],
   link: 'https://example.test/chalet',
-  source: 'serpapi',
+  url: 'https://example.test/chalet',
+});
+const lodge = stay('Hirafu Budget Lodge', 4860, 3.9, {
+  type: 'hotel',
+  units: 3,
+  unitTotalUsd: 1620,
+  sleeps: null,
+  bedrooms: null,
+});
+const skye = stay('Skye Niseko', 9900, 4.9, { type: 'hotel', highlights: ['onsen'], sleeps: null });
+
+/** Twenty past seasons where Feb 6–15 snows on 5 of its 10 days (7, 8, 11, 13, 14). */
+function history(window: { start: string; end: string }): Climatology {
+  const seasons = Array.from({ length: 20 }, (_, i) => {
+    const s = 2006 + i;
+    const { start, end } = seasonDates(s, { start: '12-01', end: '04-15' });
+    const out: { date: string; snowfallCm: number }[] = [];
+    for (let t = Date.parse(`${start}T00:00:00Z`); ; t += 86_400_000) {
+      const d = new Date(t).toISOString().slice(0, 10);
+      if (d > end) break;
+      const day = Number(d.slice(8));
+      out.push({ date: d, snowfallCm: d.slice(5, 7) === '02' && day % 5 !== 0 && day % 3 !== 0 ? 4 : 1 });
+    }
+    return { season: s, days: out };
+  });
+  return summarizeClimatology({
+    window,
+    span: { start: '12-01', end: '04-15' },
+    seasons,
+    snowDayCm: 2,
+  })!;
+}
+
+const resortLookup: LookupResult<ResortSnow> = {
+  data: {
+    annualSnowfallCm: 1480,
+    measuredWhere: 'summit',
+    monthlySnowfallCm: { december: 280, january: 390, february: 350, march: 210, april: 60 },
+    snowiestMonth: 'January',
+    notes: 'resort 10-year average',
+  },
+  sources: ['https://example.test/niseko-snow'],
+  askedAt: '2026-09-14T10:00:00Z',
+  model: 'claude-sonnet-4-6',
 };
 
 const groundLookup: LookupResult<GroundTransport> = {
@@ -170,8 +250,13 @@ function nisekoInputs(over: Partial<ExpeditionInputs> = {}, fare = 0): Expeditio
       query: 'x ski',
       checkIn: w.start,
       checkOut: w.end,
-      options: [chalet],
+      options: [lodge, chalet, skye],
       pick: chalet,
+      shortlist: [
+        { ...chalet, role: 'pick' },
+        { ...lodge, role: 'cheapest' },
+        { ...skye, role: 'nicest' },
+      ],
       searchedAt: '2026-09-14T10:00:00Z',
     } satisfies LodgingSearch,
     ground: groundLookup,
@@ -196,7 +281,22 @@ function nisekoInputs(over: Partial<ExpeditionInputs> = {}, fare = 0): Expeditio
       baseElevationM: dest.base_elevation_m,
       summitElevationM: dest.summit_elevation_m,
     }),
+    climate: { history: history(w), resort: resortLookup },
     ...over,
+  };
+}
+
+/** A well-behaved model reply, built from the fixture's real numbers. */
+function goodCopy(e: Expedition): DossierCopy {
+  return {
+    hook: 'Siberia keeps loading the cannon and Hokkaido keeps firing it.',
+    pitch: `Hirafu trees, onsen every night, and a chalet with a hot tub for $${e.lodging.perPersonUsd} each.`,
+    snow: `Snow on ~${e.climate.history!.typicalSnowDays} of these ${e.climate.history!.windowDays} days in a typical year; the resort reports ~350cm in February.`,
+    flightsNote: 'Everyone flies from home and lands the same evening.',
+    lodgingNote: 'The chalet is the one: hot tub, kitchen, sleeps six.',
+    plan: e.weather.dayPlan.map((d) => ({ date: d.date, line: `${d.plannedAt} day` })),
+    catch: 'Fares move with the dates.',
+    signoff: 'Who is in?',
   };
 }
 
@@ -256,68 +356,232 @@ describe('pickWindow', () => {
 
 /* ------------------------------------------------------------- the dossier */
 
+describe('expedition climate', () => {
+  it('leads with history while the trip is past the forecast, with the day it comes into view', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    expect(e.climate.mode).toBe('history');
+    expect(e.climate.forecastVisibleFrom).toBe('2027-01-23'); // Feb 6 is day 15 of a forecast issued Jan 23
+    expect(e.climate.history?.typicalSnowDays).toBe(5);
+    expect(e.climate.resort).toMatchObject({
+      annualCm: 1480,
+      annualM: 14.8,
+      windowMonth: 'February',
+      windowMonthCm: 350,
+    });
+    expect(e.sources).toEqual(expect.arrayContaining(['open-meteo:archive', 'lookup:resort-snow']));
+  });
+
+  it('switches to the forecast once the models reach the first day', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, new Date('2027-01-25T12:00:00Z'));
+    expect(e.climate.mode).toBe('forecast');
+  });
+
+  it('weights the resort month across a window that spans two months', () => {
+    const w = { start: '2027-01-29', end: '2027-02-07' }; // 3 days of Jan, 7 of Feb
+    const e = buildExpedition(nisekoInputs({ window: w }), cfg, NOW);
+    expect(e.climate.resort?.windowMonthCm).toBe(Math.round((390 * 3 + 350 * 7) / 10));
+  });
+
+  it('carries the shortlist into the plan with per-person numbers and links', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    expect(e.lodging.options.map((o) => [o.n, o.role, o.name])).toEqual([
+      [1, 'pick', 'Hirafu Pine Chalet'],
+      [2, 'cheapest', 'Hirafu Budget Lodge'],
+      [3, 'nicest', 'Skye Niseko'],
+    ]);
+    expect(e.lodging.options[0]).toMatchObject({
+      perPersonPerNightUsd: 126,
+      perPersonUsd: 1134,
+      url: 'https://example.test/chalet',
+    });
+    expect(e.lodging.link).toBe('https://example.test/chalet');
+  });
+});
+
 describe('dossier prompt + fallback', () => {
-  it('trims the raw quotes out of what the model sees', () => {
+  it('trims the raw quotes out of what the model sees and hands it the pitch and the history', () => {
     const e = buildExpedition(nisekoInputs(), cfg, NOW);
     const prompt = renderDossierPrompt(e);
     expect(prompt).not.toMatch(/"legs"/);
     expect(prompt).not.toMatch(/"quotes"/);
     expect(prompt).toContain('"headerLine"');
     expect(prompt).toContain('Elliot: BUR $684 / LAX $511');
-    expect(trimForPrompt(e).watchCommand).toBe('/watch niseko-0206');
+    const t = trimForPrompt(e);
+    expect(t.watchCommand).toBe('/watch niseko-0206');
+    expect(t.destination.pitch.hook).toMatch(/powder/);
+    expect(t.snow.mode).toBe('history');
+    // Past the horizon there is no forecast to misread as one.
+    expect(t.snow.forecast).toBeNull();
+    expect(t.snow.history?.typicalSnowDays).toBe(5);
+    expect(t.lodging.options.map((o) => o.role)).toEqual(['pick', 'cheapest', 'nicest']);
+    expect(t.dayPlan.every((d) => d.reason === null || !/horizon/.test(d.reason))).toBe(true);
   });
 
-  it('fallbackRender carries every PLAN §1B section, the delta lines and the watch command', () => {
+  it('fallbackRender: a pitch in the channel and three sections in the thread, all under the limit', () => {
     const e = buildExpedition(nisekoInputs(), cfg, NOW);
-    const text = fallbackRender(e);
-    expect(text.length).toBeLessThanOrEqual(DOSSIER_MAX_CHARS);
-    expect(text.startsWith(`**${headerLine(e)}**`)).toBe(true);
+    const d = fallbackRender(e);
+    for (const m of [d.root, ...d.details]) {
+      expect(m.length).toBeLessThanOrEqual(DOSSIER_MAX_CHARS);
+      // Its own numbers all trace back to the object.
+      expect(unquotedNumbers(m, e)).toEqual([]);
+    }
+    expect(d.root.startsWith(`**${headerLine(e)}**`)).toBe(true);
     expect(headerLine(e)).toMatch(
       /^🇯🇵 NISEKO UNITED — Feb 6–15 — \$[\d,]+\/person — 10 days \(6 on snow\)$/,
     );
-    for (const label of [
-      'Getting there',
-      'Where you sleep',
-      'Ground',
-      'Passes',
-      'Time off',
-      'The plan',
-      'The catch',
-    ]) {
-      expect(text).toContain(`**${label}**`);
-    }
-    for (const line of e.routing.deltaLines) expect(text).toContain(line);
-    expect(text).toContain('IKON covers 5 days');
-    expect(text).toContain('2027-02-11');
-    expect(text).toContain('**Decide by 2026-09-28.**');
-    expect(text).toContain('`/watch niseko-0206`');
-    expect(text).toMatch(/_As of 2026-09-14 12:00 UTC · sources: .*serpapi:flights/);
-    // Its own numbers all trace back to the object.
-    expect(unquotedNumbers(text, e)).toEqual([]);
+    expect(d.root).toContain(`> *${e.destination.pitch.hook}*`);
+    expect(d.root).toContain('❄️ **The snow**');
+    expect(d.root).toContain('💸 **All-in** — **$');
+    expect(d.root).toContain('at Hirafu Pine Chalet');
+    expect(d.root).toContain('**Decide by 2026-09-28.**');
+    expect(d.root).toContain('`/watch niseko-0206`');
+    expect(d.details).toHaveLength(3);
+  });
+
+  it('draws the flights as a monospace table with the delta lines under it', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const [flights] = fallbackRender(e).details;
+    expect(flights).toMatch(/^✈️ \*\*Getting there\*\*/);
+    const table = flights!.slice(flights!.indexOf('```'), flights!.lastIndexOf('```') + 3);
+    const rows = table.split('\n').slice(1, -1);
+    expect(rows[0]).toMatch(/^WHO\s+FROM\s+FARE\s+AIRLINE\s+ST\s+LANDS$/);
+    expect(rows).toHaveLength(1 + cfg.members.length);
+    expect(rows.find((r) => r.startsWith('Devin'))).toMatch(/^Devin\s+JFK\s+\$698\s+ANA\s+1\s+Sun 20:30$/);
+    // The hub marker hangs after the number, so the digits still line up.
+    const col = (who: string) => rows.find((r) => r.startsWith(who))!.indexOf('$');
+    expect(col('Elliot')).toBe(col('Devin'));
+    expect(rows.find((r) => r.startsWith('Elliot'))).toContain('$551*');
+    for (const r of rows) expect(r.length).toBeLessThanOrEqual(42);
+    for (const line of e.routing.deltaLines) expect(flights).toContain(line);
+    expect(flights).toMatch(/📉 JFK fares across/);
+  });
+
+  it('draws the stay as a table with a clickable, non-unfurling link per option', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const [, lodging] = fallbackRender(e).details;
+    expect(lodging).toMatch(/^🏠 \*\*Where you sleep\*\* · 9 nights/);
+    expect(lodging).toMatch(/# PLACE\s+TYPE\s+PP\/NT\s+PP\/TRIP\s+★/);
+    expect(lodging).toMatch(/1 Hirafu Pine Ch… 3BR\s+\$126\s+\$1,134\s+4\.7/);
+    expect(lodging).toMatch(/2 Hirafu Budget … 3 rooms/);
+    expect(lodging).toContain('**1** the pick → [Hirafu Pine Chalet](<https://example.test/chalet>) · hot tub, kitchen');
+    expect(lodging).toContain('**3** the splurge → [Skye Niseko](<https://example.test/skye-niseko>) · onsen');
+  });
+
+  it('the plan section carries the day-by-day, ground, passes, time off and the as-of line', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const [, , plan] = fallbackRender(e).details;
+    expect(plan).toMatch(/^🗓️ \*\*The plan\*\* · 10 days door to door, 6 on snow/);
+    expect(plan).toContain('• **Sat 6** — fly out');
+    expect(plan).toContain('• **Sun 7** — land · Bus CTS -> Hirafu · food and bed');
+    expect(plan).toContain('• **Thu 11** — rest day — onsen after riding\n');
+    // History mode: the fixture's forecast numbers must not leak into the plan.
+    expect(plan).not.toMatch(/\d+cm forecast/);
+    expect(plan).toContain('• **Mon 8** — ride — four linked resorts');
+    expect(plan).toContain('IKON covers 5 days');
+    expect(plan).toContain('2027-02-11');
+    expect(plan).toMatch(/-# as of 2026-09-14 12:00 UTC · sources: .*serpapi:flights/);
+  });
+
+  it('tells the snow story from history and the resort figure when the forecast cannot see the trip', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const story = snowStory(e);
+    expect(story).toMatch(/^Too far out for a forecast; the first real one sees this trip around Jan 23\./);
+    expect(story).toMatch(/new snow on ~5 of these 10 days in a typical season/);
+    expect(story).toMatch(/(in \d+ of|every one of) the last 20 seasons/);
+    expect(story).toContain('The resort reports ~350cm in a typical February.');
+    expect(unquotedNumbers(story, e)).toEqual([]);
+  });
+
+  it('says it plainly when there is no history at all', () => {
+    const e = buildExpedition(nisekoInputs({ climate: { history: null, resort: null } }), cfg, NOW);
+    expect(snowStory(e)).toMatch(/No snow history could be fetched/);
   });
 
   it('fallbackRender says unverified for passes and ground when the lookups are missing', () => {
     const e = buildExpedition(nisekoInputs({ passes: null, ground: null }), cfg, NOW);
-    const text = fallbackRender(e);
-    expect(text).toMatch(/\*\*Passes\*\* — IKON coverage is unverified/);
-    expect(text).toMatch(/\*\*Ground\*\* — Bus CTS -> Hirafu — unverified/);
-    expect(text).not.toMatch(/blackout/i);
+    const [, , plan] = fallbackRender(e).details;
+    expect(plan).toMatch(/\*\*Passes\*\* — IKON coverage is unverified/);
+    expect(plan).toMatch(/\*\*Ground\*\* — Bus CTS -> Hirafu — unverified/);
+    expect(plan).not.toMatch(/blackout/i);
+    expect(fallbackRender(e).root).toContain('ground unpriced');
   });
 
-  it('unquotedNumbers catches an invented $999 and lets real numbers through', () => {
+  it('prints the band estimate instead of a table when nothing was priced', () => {
+    const e = buildExpedition(nisekoInputs({ lodging: null }), cfg, NOW);
+    const [, lodging] = fallbackRender(e).details;
+    expect(lodging).not.toContain('```');
+    expect(lodging).toMatch(/No listing priced yet — budgeting \$135\/pp\/night/);
+  });
+
+  it('unquotedNumbers catches invented money, snow, percentages and counts', () => {
     const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const h = e.climate.history!;
     const real = `${headerLine(e)}\nElliot: BUR $684 / LAX $511 — worth the drive. ECMWF ${Math.round(
       e.weather.report.models[0]!.totalCm,
-    )}cm. Bus $27 each way, $54 round trip.`;
+    )}cm. Bus $27 each way, $54 round trip. ~1,480cm a season, 14.8m, call it 15m. Snow on ${h.typicalSnowDays} of ${h.windowDays} days, ${h.seasonsHalfSnowy} of the last ${h.seasons} seasons.`;
     expect(unquotedNumbers(real, e)).toEqual([]);
-    expect(unquotedNumbers(`${real} ZIPAIR $999 r/t and 140cm on the way.`, e)).toEqual([
-      '$999',
-      '140cm',
+    expect(
+      unquotedNumbers(`${real} ZIPAIR $999 r/t and 140cm on the way, 2,000cm a year.`, e),
+    ).toEqual(['$999', '140cm', '2,000cm']);
+    expect(unquotedNumbers('It snowed 73% more, 17 of 29 years, 600 inches.', e)).toEqual([
+      '600 inches',
+      '73%',
+      '17 of 29',
     ]);
+    // A date in a note is not a licence to quote its digits as a count.
+    // The year 2027 is in every date in the object, but dates don't license their digits.
+    expect(unquotedNumbers('It snowed on 2027 of 2026 days.', e)).toEqual(['2027 of 2026']);
     // Thousands separators are the model's choice, not a different number.
     expect(unquotedNumbers(`$${e.cost.perPersonUsd.toLocaleString('en-US')}/person`, e)).toEqual(
       [],
     );
+  });
+});
+
+describe('composeCopy', () => {
+  it('uses a well-behaved reply as written', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const copy = goodCopy(e);
+    const out = composeCopy(JSON.stringify(copy), e);
+    expect(out.replaced).toEqual([]);
+    expect(out.copy).toEqual(copy);
+    const d = renderDossier(e, out.copy);
+    expect(d.root).toContain('> *Siberia keeps loading the cannon');
+    expect(d.details[2]).toContain('• **Sat 6** — travel day');
+  });
+
+  it('swaps only the field that invented a number, and fills a missing day', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const copy = goodCopy(e);
+    copy.snow = 'Niseko got 777cm last February alone.';
+    copy.plan = copy.plan.slice(1);
+    const out = composeCopy('```json\n' + JSON.stringify(copy) + '\n```', e);
+    const base = fallbackCopy(e);
+    expect(out.copy.hook).toBe(copy.hook);
+    expect(out.copy.snow).toBe(base.snow);
+    expect(out.copy.plan[0]).toEqual(base.plan[0]);
+    expect(out.copy.plan[1]!.line).toBe(copy.plan[0]!.line);
+    expect(out.replaced.map((r) => r.field).sort()).toEqual(['plan 2027-02-06', 'snow']);
+    expect(out.replaced.find((r) => r.field === 'snow')!.why).toMatch(/777cm/);
+  });
+
+  it('cuts an over-long field at a sentence, and falls back when it cannot', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const copy = goodCopy(e);
+    const sentence = 'The trees are deep and the lines are short. ';
+    copy.pitch = sentence.repeat(20);
+    copy.hook = 'x'.repeat(400);
+    const out = composeCopy(JSON.stringify(copy), e);
+    expect(out.copy.pitch.length).toBeLessThanOrEqual(480);
+    expect(out.copy.pitch.endsWith('short.')).toBe(true);
+    expect(out.copy.hook).toBe(fallbackCopy(e).hook);
+  });
+
+  it('falls back entirely when the reply is not the object', () => {
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    const out = composeCopy('Here is your dossier! Niseko is great.', e);
+    expect(out.copy).toEqual(fallbackCopy(e));
+    expect(out.replaced[0]!.field).toBe('*');
   });
 });
 
@@ -428,9 +692,10 @@ describe('runExpeditionBuild', () => {
     expect(misses[0]!.reason).toMatch(/over the \$2600 ceiling/);
 
     const p = posts();
-    expect(p.map((x) => x.kind)).toEqual(['root']);
+    expect(p.map((x) => x.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
     expect(p[0]!.summary).toMatch(/^\*\*🇯🇵 NISEKO UNITED — Feb 6–15/);
-    expect(out?.dossier).toBe(fallbackRender(out!.expedition));
+    expect(p[1]!.summary).toMatch(/^✈️ \*\*Getting there/);
+    expect(out?.dossier).toEqual(fallbackRender(out!.expedition));
     expect(completions).toBe(0); // dry run without a key never calls the model
   });
 
@@ -472,7 +737,7 @@ describe('runExpeditionBuild', () => {
     expect(expeditions()[0]).toMatchObject({ id: 'rusutsu-0206', status: 'proposed' });
     expect(nearMisses()).toEqual([]);
     expect(kvGet(db, KV_BUILD_REQUEST)).toBeUndefined();
-    expect(posts().map((p) => p.kind)).toEqual(['root']);
+    expect(posts().map((p) => p.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
   });
 
   it('forced build passes the month hint into the window it asks gather for', async () => {
@@ -513,18 +778,23 @@ describe('runExpeditionBuild', () => {
     expect(expeditions()).toEqual([]);
   });
 
-  it('uses the model when it behaves and falls back when it invents a number', async () => {
+  it('uses the model when it behaves, and swaps only the field that invents a number', async () => {
     const d = deps();
-    const good = 'A dossier with $511 and nothing invented.';
-    d.complete = async () => good;
-    const withKey = { ...process.env, ANTHROPIC_API_KEY: 'test-key' };
-    vi.stubEnv('ANTHROPIC_API_KEY', withKey.ANTHROPIC_API_KEY!);
+    let asked: { prompt: string; system?: string } | null = null;
+    d.complete = async (prompt, opts) => {
+      asked = { prompt, system: opts.system };
+      return JSON.stringify(goodCopy(buildExpedition(nisekoInputs(), cfg, NOW)));
+    };
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
     try {
       const out = await runExpeditionBuild(ctx(), d);
-      expect(out?.dossier).toBe(good);
+      expect(asked!.system).toMatch(/make them want it/);
+      expect(asked!.prompt).toContain('"mode": "history"');
+      expect(out?.dossier.root).toContain('Siberia keeps loading the cannon');
 
       const db2 = openDb(':memory:');
-      d.complete = async () => 'ZIPAIR LAX→NRT $999 r/t.';
+      d.complete = async () =>
+        JSON.stringify({ ...goodCopy(buildExpedition(nisekoInputs(), cfg, NOW)), pitch: 'ZIPAIR LAX→NRT $999 r/t.' });
       const out2 = await runExpeditionBuild(
         ctx({
           db: db2,
@@ -532,10 +802,70 @@ describe('runExpeditionBuild', () => {
         }),
         d,
       );
-      expect(out2?.dossier).toBe(fallbackRender(out2!.expedition));
+      expect(out2?.dossier.root).toContain('Siberia keeps loading the cannon');
+      expect(out2?.dossier.root).not.toContain('$999');
+      expect(out2?.dossier.root).toContain(fallbackCopy(out2!.expedition).pitch);
+
+      const db3 = openDb(':memory:');
+      d.complete = async () => { throw new Error('overloaded'); };
+      const out3 = await runExpeditionBuild(
+        ctx({
+          db: db3,
+          poster: new Poster(cfg, db3, { dryRun: true, target: 'test', job: 'expeditionBuild' }),
+        }),
+        d,
+      );
+      expect(out3?.dossier).toEqual(fallbackRender(out3!.expedition));
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('a rebuild edits the root and every thread section in place', async () => {
+    const calls: string[] = [];
+    let n = 0;
+    class FakePoster extends Poster {
+      override async postRoot() {
+        calls.push('root');
+        return { messageId: 'root-1', suppressed: false };
+      }
+      override async ensureThread() {
+        return 'thread-1';
+      }
+      override async postThread(threadId: string | null) {
+        n += 1;
+        calls.push(`thread:${threadId}`);
+        return { messageId: `detail-${n}`, suppressed: false };
+      }
+      override async editMessage(id: string) {
+        calls.push(`edit:${id}`);
+        return { messageId: id, suppressed: false };
+      }
+      override async editThreadMessage(threadId: string, id: string) {
+        calls.push(`edit:${threadId}/${id}`);
+        return { messageId: id, suppressed: false };
+      }
+    }
+    const poster = new FakePoster(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    const c = ctx({ poster });
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
+    await runExpeditionBuild(c, deps());
+    expect(calls).toEqual(['root', 'thread:thread-1', 'thread:thread-1', 'thread:thread-1']);
+    expect(JSON.parse(kvGet(db, kvDetailsKey('niseko-0206'))!)).toEqual([
+      'detail-1',
+      'detail-2',
+      'detail-3',
+    ]);
+
+    calls.length = 0;
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
+    await runExpeditionBuild(c, deps());
+    expect(calls).toEqual([
+      'edit:root-1',
+      'edit:thread-1/detail-1',
+      'edit:thread-1/detail-2',
+      'edit:thread-1/detail-3',
+    ]);
   });
 });
 

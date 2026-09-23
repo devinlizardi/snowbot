@@ -95,6 +95,14 @@ weather:
     forecast: 180
     archive: 720
     seasonal: 1440
+    climatology: 525600 # a finished season never changes; a year so rows can age out
+  # Snow history for a trip window, from the Open-Meteo archive (ERA5).
+  # Counts and ratios only — the grid undercounts mountain snow, so the cm the
+  # group reads come from the resort's own average (lookup:resort-snow).
+  climatology:
+    seasons: 20 # past seasons summarised per window
+    snow_day_cm: 2 # modelled new snow that counts as "a snow day"
+    pace_ms: 1500 # wait after each live archive request (free tier: 600 weighted calls/min)
 
 flights:
   provider: serpapi
@@ -106,6 +114,11 @@ lodging:
   provider: serpapi
   min_sleeps: 5
   cache_ttl_hours: 144
+  # Google prices hotels per room and never says how many a room sleeps, so a
+  # hotel is priced as ceil(min_sleeps / this) rooms.
+  hotel_guests_per_room: 2
+  # Also search whole-place rentals (one more SerpApi search per build).
+  search_rentals: true
 
 llm:
   fast_model: claude-haiku-4-5 # routine post formatting
@@ -122,9 +135,12 @@ expedition:
   season:
     start: 12-01
     end: 04-15
+  # A weekly build's window is always past the 15-day forecast, so what usually
+  # falls in that window leads; what's falling now is a smaller snowpack read.
   ranking_weights:
-    forecast_snow_10d_confidence_weighted: 0.45
-    observed_snow_7d: 0.20
+    historical_snow: 0.40
+    forecast_snow_10d_confidence_weighted: 0.15
+    observed_snow_7d: 0.10
     cost: 0.20
     logistics_ease: 0.15
 
@@ -133,6 +149,14 @@ expedition:
 # verification in Packet 2. `pass_verify: true` means the IKON/blackout answer
 # must come from a live lookup (Packet 6) before it can appear in a dossier —
 # nothing here is quoted to the group as fact.
+#
+# `pitch` is the dossier's colour: why the place is worth the flight, in the
+# group's terms. Hand-written — edit freely, it's the voice of the pitch. It
+# must never carry prices or snow totals; those only come from live data.
+#   hook      one line: the reason to go
+#   terrain   what the riding is like
+#   off_snow  what the days and nights off look like (onsen, food, après)
+#   heads_up  the honest caveats a friend would mention
 board:
   - id: niseko
     name: Niseko United
@@ -147,6 +171,18 @@ board:
     min_days: 8
     ideal_days: 10
     pass_verify: true
+    pitch:
+      hook: "The most famous powder on earth — Siberian storms cross the Sea of Japan and unload on Hokkaido almost daily in midwinter."
+      terrain:
+        - "Four linked resorts around Mt. Annupuri on one all-mountain ticket"
+        - "Hirafu and Hanazono tree runs, plus gate-accessed sidecountry"
+        - "Floodlit night riding in Hirafu"
+      off_snow:
+        - "Onsen after riding — the whole area sits on hot springs"
+        - "Izakaya, ramen and sake in Hirafu village"
+        - "Mt. Yōtei towering over the valley"
+      heads_up:
+        - "Hirafu is busy in peak season — book dinners ahead"
   - id: rusutsu
     name: Rusutsu
     region: JP
@@ -160,6 +196,17 @@ board:
     min_days: 8
     ideal_days: 10
     pass_verify: true
+    pitch:
+      hook: "Hokkaido snow without the Niseko crowds — three mountains of glades and empty weekday groomers."
+      terrain:
+        - "Three peaks (East, West, Mt. Isola) linked by gondola"
+        - "Some of the best tree riding in Hokkaido"
+        - "Wide-open groomers with no lift lines"
+      off_snow:
+        - "Lake Tōya's hot-spring town is a short drive"
+        - "An easy day trip over to Niseko"
+      heads_up:
+        - "The village is basically the resort — nights are quiet"
   - id: hakuba
     name: Hakuba Valley
     region: JP
@@ -173,6 +220,18 @@ board:
     min_days: 8
     ideal_days: 10
     pass_verify: true
+    pitch:
+      hook: "The 1998 Olympic valley — ten resorts, real alpine terrain, and Japanese powder a train ride from Tokyo."
+      terrain:
+        - "Ten resorts in one valley: Happo-one, Cortina, Goryu and more"
+        - "Above-treeline bowls at Happo-one"
+        - "Cortina's trees are the storm-day move"
+      off_snow:
+        - "Onsen all over the valley"
+        - "Izakaya and sake in Echoland and Happo village"
+        - "Snow monkeys at Jigokudani as a rest-day trip"
+      heads_up:
+        - "Resorts are spread out — the valley shuttle or a car matters"
   - id: nozawa
     name: Nozawa Onsen
     region: JP
@@ -186,6 +245,17 @@ board:
     min_days: 8
     ideal_days: 10
     pass_verify: true
+    pitch:
+      hook: "A centuries-old hot-spring village with a big mountain on its doorstep — the most Japanese trip on the board."
+      terrain:
+        - "One big mountain with over 1,000m of vertical"
+        - "Tree runs and powder stashes off the upper mountain"
+      off_snow:
+        - "Thirteen free public bathhouses in the village — an onsen crawl after riding"
+        - "Cobbled lanes, izakaya and local nozawana pickles"
+        - "The Dosojin fire festival every January 15"
+      heads_up:
+        - "Shinkansen then a bus from Tokyo — easy, but a transfer"
   - id: whistler
     name: Whistler Blackcomb
     region: CA
@@ -199,6 +269,17 @@ board:
     min_days: 5
     ideal_days: 7
     pass_verify: true
+    pitch:
+      hook: "North America's biggest resort — two whole mountains and a real village, a short hop for the West Coast crew."
+      terrain:
+        - "Whistler and Blackcomb joined by the Peak 2 Peak gondola"
+        - "Alpine bowls and glaciers up top, trees below"
+        - "Serious terrain parks"
+      off_snow:
+        - "The best après in North America, starting at the base"
+        - "Scandinave Spa for a rest day"
+      heads_up:
+        - "Coastal snow — mild spells can rain at the base; ride high"
   - id: revelstoke
     name: Revelstoke
     region: CA
@@ -212,6 +293,17 @@ board:
     min_days: 5
     ideal_days: 7
     pass_verify: true
+    pitch:
+      hook: "The biggest lift-served vertical in North America, in a real mountain town instead of a resort village."
+      terrain:
+        - "About 1,700m of vertical top to bottom"
+        - "Deep, steep trees and big alpine bowls"
+        - "Cat and heli operators in town for anyone who wants to splurge"
+      off_snow:
+        - "Downtown Revelstoke's breweries and diners"
+        - "A low-key locals' town, no mega-village"
+      heads_up:
+        - "A 2.5h winter drive from Kelowna — someone drives"
   - id: banff
     name: Banff / Lake Louise
     region: CA
@@ -225,6 +317,18 @@ board:
     min_days: 5
     ideal_days: 7
     pass_verify: true
+    pitch:
+      hook: "Canadian Rockies scenery that doesn't look real — three resorts on one ticket and a proper town at night."
+      terrain:
+        - "Lake Louise's back bowls"
+        - "Sunshine Village's high alpine, including Delirium Dive"
+        - "Cold, dry Rockies snow"
+      off_snow:
+        - "Banff Upper Hot Springs after riding"
+        - "Banff Avenue bars and restaurants"
+        - "A walk on frozen Lake Louise"
+      heads_up:
+        - "It gets properly cold in midwinter — pack for it"
   - id: fernie
     name: Fernie Alpine Resort
     region: CA
@@ -238,6 +342,16 @@ board:
     min_days: 5
     ideal_days: 7
     pass_verify: true
+    pitch:
+      hook: "Five bowls of deep Rockies powder and an old mining town that still feels like a secret."
+      terrain:
+        - "Five alpine bowls"
+        - "Some of the deepest snow in the Canadian Rockies"
+      off_snow:
+        - "Historic downtown Fernie's bars and restaurants"
+        - "Small-town, no-crowds vibe"
+      heads_up:
+        - "About 3h by car from Calgary"
   - id: jackson
     name: Jackson Hole
     region: US
@@ -251,6 +365,18 @@ board:
     min_days: 4
     ideal_days: 6
     pass_verify: true
+    pitch:
+      hook: "The most legendary steeps in the US — Corbet's Couloir is right there, and the tram takes you to it."
+      terrain:
+        - "The aerial tram to the summit"
+        - "Corbet's Couloir and endless steep chutes"
+        - "Over 1,200m of continuous vertical"
+      off_snow:
+        - "Saddle barstools at the Million Dollar Cowboy Bar"
+        - "Mangy Moose at the base"
+        - "Grand Teton views all day"
+      heads_up:
+        - "An expert-heavy mountain; Teton Village lodging runs pricey"
   - id: big-sky
     name: Big Sky
     region: US
@@ -264,6 +390,17 @@ board:
     min_days: 4
     ideal_days: 6
     pass_verify: true
+    pitch:
+      hook: "A huge, empty mountain — Lone Peak's tram and almost no lift lines."
+      terrain:
+        - "The Lone Peak tram to the summit"
+        - "One of the biggest ski areas in the US"
+        - "Uncrowded, even on weekends"
+      off_snow:
+        - "Yellowstone next door — a snowcoach day on a rest day"
+        - "Easygoing Montana town"
+      heads_up:
+        - "Remote — Bozeman, then an hour's shuttle"
   - id: alta-snowbird
     name: Alta / Snowbird
     region: US
@@ -277,6 +414,17 @@ board:
     min_days: 4
     ideal_days: 6
     pass_verify: true
+    pitch:
+      hook: "Little Cottonwood Canyon's famous Utah powder, under an hour from the airport."
+      terrain:
+        - "Snowbird's tram and steep, long fall-line runs"
+        - "Mineral Basin on the back side"
+      off_snow:
+        - "The Cliff Lodge spa at Snowbird"
+        - "Salt Lake City breweries down the canyon"
+      heads_up:
+        - "Alta is skiers-only — this trip is Snowbird"
+        - "The canyon road can close for avalanche control on big storm days"
   - id: palisades
     name: Palisades Tahoe
     region: US
@@ -290,6 +438,18 @@ board:
     min_days: 3
     ideal_days: 5
     pass_verify: true
+    pitch:
+      hook: "Tahoe's big-mountain classic — KT-22, lake views, and an easy flight for the West Coast half."
+      terrain:
+        - "KT-22 and the Palisades cliffs"
+        - "Palisades and Alpine linked by gondola"
+        - "The 1960 Olympics venue"
+      off_snow:
+        - "Lake Tahoe views"
+        - "Downtown Truckee"
+        - "Reno within an hour"
+      heads_up:
+        - "Sierra snow is heavy, and big storms can close the roads"
   - id: chamonix
     name: Chamonix
     region: EU
@@ -303,6 +463,19 @@ board:
     min_days: 7
     ideal_days: 9
     pass_verify: true
+    pitch:
+      hook: "The birthplace of extreme skiing — Mont Blanc overhead, the Vallée Blanche, and French food every night."
+      terrain:
+        - "The Vallée Blanche off the Aiguille du Midi (with a guide)"
+        - "Grands Montets and serious off-piste"
+        - "Several separate areas along one valley"
+      off_snow:
+        - "French food and wine every night"
+        - "Aiguille du Midi cable car views"
+        - "Lunch in Courmayeur, Italy, through the tunnel"
+      heads_up:
+        - "Glacier terrain needs a guide"
+        - "The areas are spread out — the valley bus links them"
   - id: zermatt
     name: Zermatt
     region: EU
@@ -316,6 +489,17 @@ board:
     min_days: 7
     ideal_days: 9
     pass_verify: true
+    pitch:
+      hook: "Riding under the Matterhorn and crossing into Italy for lunch — the most photogenic trip on the board."
+      terrain:
+        - "Matterhorn Glacier Paradise, the highest lift-served terrain in the Alps"
+        - "Ride over the border to Cervinia"
+        - "High-altitude, reliable snow"
+      off_snow:
+        - "A car-free village"
+        - "Mountain-hut lunches worth planning a day around"
+      heads_up:
+        - "Switzerland is expensive, on and off the mountain"
   - id: st-anton
     name: St. Anton am Arlberg
     region: EU
@@ -329,3 +513,13 @@ board:
     min_days: 7
     ideal_days: 9
     pass_verify: true
+    pitch:
+      hook: "The après capital of the Alps, with the terrain to back it up."
+      terrain:
+        - "The huge linked Ski Arlberg area"
+        - "Legendary off-piste"
+      off_snow:
+        - "MooserWirt and Krazy Kanguruh après"
+        - "Austrian hut food"
+      heads_up:
+        - "Big off-piste reputation — respect the avalanche conditions"

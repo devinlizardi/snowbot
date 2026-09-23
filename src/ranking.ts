@@ -1,13 +1,21 @@
+import type { ExpeditionResortSnow } from './builder.js';
 import type { Config, Destination } from './config.js';
+import type { Climatology } from './sources/weather/climatology.js';
 import type { Confidence } from './sources/weather/consensus.js';
 
 /**
- * Destination ranking, PLAN.md §5:
+ * Destination ranking, PLAN.md §5 as amended Sept 2026:
  *
- *   0.45 · forecast_snow_10d (confidence-weighted)
- * + 0.20 · observed_snow_7d
+ *   0.40 · historical_snow (the proposed window, from history)
+ * + 0.15 · forecast_snow_10d (confidence-weighted)
+ * + 0.10 · observed_snow_7d
  * + 0.20 · (1 − est_cost_pp / ceiling)
  * + 0.15 · logistics_ease
+ *
+ * The window a weekly build proposes is always past the forecast (21-day lead,
+ * 15-day forecast), so what is falling *now* says little about the trip; what
+ * usually falls in that window says a lot. The two now-terms stay, smaller, as
+ * a read on the season's snowpack. Weights live in config.yaml.
  *
  * Every term is clipped to [0, 1] before it is weighted, so a monster forecast
  * cannot buy its way past a bad price and a cheap trip with no snow still
@@ -36,6 +44,10 @@ export type ScoreInput = {
   ceilingUsd: number;
   /** 0–1; see `logisticsEaseFor`. */
   logisticsEase: number;
+  /** 0–1 from `historicalScore`; null when there was no history to score. */
+  historical?: number | null;
+  /** One line for the log, e.g. "snow on ~6 of 10 days in a typical season". */
+  historicalReason?: string;
 };
 
 export type Ranked = {
@@ -67,6 +79,34 @@ export const CONFIDENCE_WEIGHT: Record<Confidence, number> = { high: 1, medium: 
 export const SNOW_REFERENCE_CM = 100;
 /** Same daily rate over the trailing week. */
 export const OBSERVED_REFERENCE_CM = 70;
+
+/** New snow on 60% of a window's days, in a typical season, is a full score. */
+export const SNOW_DAY_SHARE_REFERENCE = 0.6;
+/** A resort-reported monthly average of 300cm is a full score… */
+export const RESORT_MONTH_REFERENCE_CM = 300;
+/** …or, with no monthly figure, an annual average of 1200cm. */
+export const RESORT_ANNUAL_REFERENCE_CM = 1200;
+/** No history at all scores as middling rather than as a bad place to go. */
+export const HISTORY_UNKNOWN = 0.4;
+
+/**
+ * How good this window usually is, 0–1: how often it snows (archive, a
+ * frequency, which the coarse grid gets roughly right) averaged with how much
+ * (the resort's own figure, which the archive can't give). Either half alone
+ * is used when the other is missing; null when both are.
+ */
+export function historicalScore(
+  history: Pick<Climatology, 'typicalSnowDays' | 'windowDays'> | null,
+  resort: Pick<ExpeditionResortSnow, 'windowMonthCm' | 'annualCm'> | null,
+): number | null {
+  const parts: number[] = [];
+  if (history && history.windowDays > 0) {
+    parts.push(clip01(history.typicalSnowDays / history.windowDays / SNOW_DAY_SHARE_REFERENCE));
+  }
+  if (resort?.windowMonthCm != null) parts.push(clip01(resort.windowMonthCm / RESORT_MONTH_REFERENCE_CM));
+  else if (resort?.annualCm != null) parts.push(clip01(resort.annualCm / RESORT_ANNUAL_REFERENCE_CM));
+  return parts.length ? round3(parts.reduce((a, b) => a + b, 0) / parts.length) : null;
+}
 
 /**
  * Round-trip airfare priors by region, USD per person. These exist only so
@@ -115,8 +155,10 @@ export function scoreDestination(input: ScoreInput, weights: Weights): number {
   const observed = clip01(input.observed7dCm / OBSERVED_REFERENCE_CM);
   const cost = clip01(1 - input.estCostPp / input.ceilingUsd);
   const logistics = clip01(input.logisticsEase);
+  const history = clip01(input.historical ?? HISTORY_UNKNOWN);
   return round3(
-    weights.forecast_snow_10d_confidence_weighted * snow +
+    weights.historical_snow * history +
+      weights.forecast_snow_10d_confidence_weighted * snow +
       weights.observed_snow_7d * observed +
       weights.cost * cost +
       weights.logistics_ease * logistics,
@@ -177,6 +219,8 @@ export function rankBoard(
 /** Why it scored what it did, in the terms a person would argue about. */
 function reasonsFor(c: ScoreInput): string[] {
   return [
+    c.historicalReason ??
+      (c.historical == null ? 'no snow history' : `history score ${c.historical}`),
     `${Math.round(c.snow.forecast10dCm)}cm forecast over 10 days, ${c.snow.confidence} confidence`,
     `${Math.round(c.observed7dCm)}cm fell in the last 7 days`,
     `~$${c.estCostPp}/pp against a $${c.ceilingUsd} ceiling (estimate, not a quote)`,

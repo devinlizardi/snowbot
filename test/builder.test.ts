@@ -92,6 +92,7 @@ function lodgingFixture(
     checkOut: window.end,
     options: [pick],
     pick,
+    shortlist: [{ ...pick, role: 'pick' }],
     searchedAt: '2026-09-14T10:00:00Z',
   };
 }
@@ -100,12 +101,17 @@ const chalet: LodgingOption = {
   name: 'Hirafu Pine Chalet',
   type: 'vacation_rental',
   totalUsd: 5670,
+  unitTotalUsd: 5670,
+  units: 1,
   perNightUsd: 630,
   perPersonPerNightUsd: 126,
   rating: 4.7,
   reviews: 38,
   sleeps: 6,
+  bedrooms: 3,
+  highlights: ['hot tub', 'kitchen'],
   link: 'https://example.test/chalet',
+  url: 'https://example.test/chalet',
   source: 'serpapi',
 };
 

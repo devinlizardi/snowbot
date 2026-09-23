@@ -318,3 +318,55 @@ export function passStatusLookup(
     context: { resort, pass, start: dates.start, end: dates.end },
   }));
 }
+
+/**
+ * The resort's own average snowfall — the headline number the group will
+ * recognise ("Niseko gets ~15m a season"). The archive can say *how often* it
+ * snows in a window but undercounts *how much*, so this is where the cm come
+ * from. It is a marketing-adjacent figure measured wherever the resort likes,
+ * so `measuredWhere` travels with it. Averages move on a scale of years; the
+ * cache holds it for six months.
+ */
+export const ResortSnowSchema = z.object({
+  annualSnowfallCm: z
+    .number()
+    .nullable()
+    .describe('average annual snowfall the resort itself reports, cm (convert inches × 2.54)'),
+  measuredWhere: z
+    .string()
+    .nullable()
+    .describe('where that figure is measured, e.g. "summit", "mid-mountain", "base"'),
+  monthlySnowfallCm: z
+    .object({
+      december: z.number().nullable(),
+      january: z.number().nullable(),
+      february: z.number().nullable(),
+      march: z.number().nullable(),
+      april: z.number().nullable(),
+    })
+    .describe(
+      'average snowfall in each month, cm — from the resort or a reputable snow-history site; null where no source gives it',
+    ),
+  snowiestMonth: z.string().nullable().describe('the month the sources agree is snowiest, in English'),
+  notes: z.string().describe('years averaged, which source gave the monthly figures, caveats'),
+});
+export type ResortSnow = z.infer<typeof ResortSnowSchema>;
+
+export const resortSnowSpec: LookupSpec<ResortSnow> = {
+  name: 'lookup:resort-snow',
+  schema: ResortSnowSchema,
+  ttlMinutes: 180 * 24 * 60,
+};
+
+export function resortSnowLookup(
+  llm: Completer,
+): Source<{ resort: string }, LookupResult<ResortSnow>> {
+  return typed(llm, resortSnowSpec, ({ resort }) => ({
+    question:
+      `What is the average annual snowfall at ${resort}, as the resort reports it, and the ` +
+      'average snowfall in each month from December to April? Use the official resort figure ' +
+      'for the annual number; monthly averages may come from a reputable snow-history site if ' +
+      'the resort does not publish them.',
+    context: { resort },
+  }));
+}

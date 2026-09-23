@@ -2,33 +2,39 @@ import {
   buildExpedition,
   gatherExpeditionInputs,
   insertExpedition,
+  resortSnowFor,
   type DateWindow,
   type Expedition,
   type ExpeditionInputs,
+  type ExpeditionResortSnow,
 } from '../builder.js';
 import { optionalSecret, type Destination } from '../config.js';
 import type { DB } from '../db.js';
-import { kvDelete, kvGet } from '../db.js';
+import { kvDelete, kvGet, kvSet } from '../db.js';
 import { isQuiet } from '../discord/commands.js';
 import type { CompleteOptions } from '../llm/client.js';
 import {
-  DOSSIER_MAX_CHARS,
+  composeCopy,
   DOSSIER_SYSTEM_PROMPT,
   fallbackRender,
   fmtWindow,
+  renderDossier,
   renderDossierPrompt,
-  unquotedNumbers,
+  type RenderedDossier,
 } from '../llm/prompts/dossier.js';
 import {
   ceilingFor,
   estimateCostForRanking,
+  historicalScore,
   logisticsEaseFor,
   rankBoard,
   type RecentBuild,
   type ScoreInput,
 } from '../ranking.js';
 import { cached } from '../sources/_cache.js';
+import { resortSnowLookup } from '../sources/lookup.js';
 import { archive, trailingWeek } from '../sources/weather/archive.js';
+import { fetchClimatology, type Climatology } from '../sources/weather/climatology.js';
 import { buildSnowReport, type Confidence } from '../sources/weather/consensus.js';
 import { crosscheckFor } from '../sources/weather/crosscheck.js';
 import { ecmwfIfs } from '../sources/weather/ecmwf.js';
@@ -51,6 +57,8 @@ import type { Job, JobContext } from './_runner.js';
  */
 
 export const KV_BUILD_REQUEST = 'expedition:build_request';
+/** `expedition:details:<id>` → JSON array of the thread message ids, so a rebuild edits them. */
+export const kvDetailsKey = (id: string) => `expedition:details:${id}`;
 
 /** Earliest a window may start: fares need a lead, and so does the group. */
 export const MIN_LEAD_DAYS = 21;
@@ -65,6 +73,9 @@ export type SnowSignal = {
   forecast10dCm: number;
   confidence: Confidence;
   observed7dCm: number;
+  /** 0–1 from `historicalScore` for the window this destination would be built for. */
+  historical?: number | null;
+  historicalReason?: string;
 };
 
 export type BuildRequest = { destination?: string; month?: string };
@@ -72,15 +83,15 @@ export type BuildRequest = { destination?: string; month?: string };
 export type ExpeditionBuildDeps = {
   /** The expensive half: SerpApi + lookups. Stubbed in tests. */
   gather(ctx: JobContext, dest: Destination, window: DateWindow): Promise<ExpeditionInputs>;
-  /** The cheap half: Open-Meteo at the base, for the pre-rank only. */
-  fetchSnow(dest: Destination): Promise<SnowSignal>;
+  /** The cheap half: Open-Meteo at the base plus the window's history, for the pre-rank only. */
+  fetchSnow(dest: Destination, window: DateWindow): Promise<SnowSignal>;
   /** Sonnet, in production; a stub or a thrower in tests. */
   complete(prompt: string, opts: CompleteOptions): Promise<string>;
 };
 
 export type BuildOutcome = {
   expedition: Expedition;
-  dossier: string;
+  dossier: RenderedDossier;
   posted: boolean;
   forced: boolean;
 };
@@ -234,7 +245,7 @@ export const expeditionBuildJob: Job = {
     if (offline) ctx.log.warn('dry run without OPEN_METEO_LIVE — serving cache only');
     await runExpeditionBuild(ctx, {
       gather: (c, dest, window) => gatherExpeditionInputs(c, dest, window, { offline }),
-      fetchSnow: (dest) => fetchSnowSignal(ctx, dest, { offline }),
+      fetchSnow: (dest, window) => fetchSnowSignal(ctx, dest, window, { offline }),
       complete: (prompt, opts) => ctx.llm.complete(prompt, opts),
     });
   },
@@ -249,10 +260,13 @@ async function prerank(
 ): Promise<Destination[]> {
   const { cfg, db, now, log } = ctx;
   const inputs: ScoreInput[] = [];
+  const windows = new Map<string, DateWindow>();
   for (const dest of cfg.board) {
+    const window = pickWindow(dest, now, undefined, aspen, cfg.expedition.season);
+    windows.set(dest.id, window);
     let snow: SnowSignal;
     try {
-      snow = await deps.fetchSnow(dest);
+      snow = await deps.fetchSnow(dest, window);
     } catch (err) {
       log.warn('no weather for pre-rank — scoring on cost and logistics only', {
         destination: dest.id,
@@ -267,6 +281,8 @@ async function prerank(
       estCostPp: estimateCostForRanking(dest),
       ceilingUsd: ceilingFor(dest, cfg),
       logisticsEase: logisticsEaseFor(dest),
+      historical: snow.historical ?? null,
+      ...(snow.historicalReason ? { historicalReason: snow.historicalReason } : {}),
     });
   }
 
@@ -275,7 +291,7 @@ async function prerank(
     writeNearMiss(
       db,
       miss.dest.id,
-      pickWindow(miss.dest, now, undefined, aspen).start,
+      windows.get(miss.dest.id)!.start,
       miss.estCostPp,
       miss.reason,
     );
@@ -289,13 +305,16 @@ async function prerank(
 }
 
 /**
- * The weather half of the ranking for one destination: ECMWF IFS plus the
- * regional cross-check at the base over the next ten days, and the archive's
- * trailing week. Each source is optional; with none the signal is zero.
+ * The weather half of the ranking for one destination: what usually falls in
+ * the window it would be built for (archive history + the resort's average),
+ * ECMWF IFS plus the regional cross-check at the base over the next ten days,
+ * and the archive's trailing week. Each source is optional; with none the
+ * signal is zero (history: unknown).
  */
 export async function fetchSnowSignal(
-  ctx: Pick<JobContext, 'cfg' | 'db' | 'now' | 'log'>,
+  ctx: Pick<JobContext, 'cfg' | 'db' | 'now' | 'log' | 'llm'>,
   dest: Destination,
+  window: DateWindow,
   opts: { offline: boolean },
 ): Promise<SnowSignal> {
   const { cfg, db, now, log } = ctx;
@@ -348,76 +367,126 @@ export async function fetchSnowSignal(
     log.warn('pre-rank archive unavailable', { destination: dest.id, error: String(err) });
   }
 
+  let history: Climatology | null = null;
+  try {
+    history = await fetchClimatology(ctx, dest, window, { offline: opts.offline });
+  } catch (err) {
+    log.warn('pre-rank history unavailable', { destination: dest.id, error: String(err) });
+  }
+  let resort: ExpeditionResortSnow | null = null;
+  try {
+    const got = await cached(db, resortSnowLookup(ctx.llm), { resort: dest.name }, get);
+    resort = resortSnowFor(got.value, window);
+  } catch (err) {
+    log.warn('pre-rank resort snow unavailable', { destination: dest.id, error: String(err) });
+  }
+  const historical = historicalScore(history, resort);
+
   return {
     forecast10dCm: Math.round(forecast10dCm * 10) / 10,
     confidence: report.confidence,
     observed7dCm,
+    historical,
+    historicalReason: historyReason(history, resort, historical),
   };
+}
+
+function historyReason(
+  h: Climatology | null,
+  r: ExpeditionResortSnow | null,
+  score: number | null,
+): string {
+  if (score === null) return 'no snow history';
+  const bits: string[] = [];
+  if (h) bits.push(`snow on ~${h.typicalSnowDays} of ${h.windowDays} days in a typical season`);
+  if (r?.windowMonthCm != null) bits.push(`resort avg ${r.windowMonthCm}cm in ${r.windowMonth}`);
+  else if (r?.annualCm != null) bits.push(`resort avg ${r.annualCm}cm a season`);
+  return `${bits.join('; ')} (history ${score})`;
 }
 
 /* -------------------------------------------------------------- dossier */
 
-/** Sonnet when we can, the deterministic dossier when we can't or it invents a number. */
+/**
+ * Sonnet writes the copy when we can; each field that invents a number or
+ * can't be cut to length is swapped for the deterministic version, and the
+ * whole thing falls back when there is no key or no usable reply.
+ */
 async function writeDossier(
   ctx: JobContext,
   deps: ExpeditionBuildDeps,
   e: Expedition,
-): Promise<string> {
+): Promise<RenderedDossier> {
   if (ctx.dryRun && !optionalSecret('ANTHROPIC_API_KEY')) {
     ctx.log.info('dry run without ANTHROPIC_API_KEY — using the fallback dossier');
     return fallbackRender(e);
   }
+  let reply: string | null = null;
   try {
-    const text = await deps.complete(renderDossierPrompt(e), {
+    reply = await deps.complete(renderDossierPrompt(e), {
       model: 'smart',
       system: DOSSIER_SYSTEM_PROMPT,
-      maxTokens: 1500,
+      maxTokens: 2500,
     });
-    if (!text.trim()) throw new Error('empty completion');
-    const invented = unquotedNumbers(text, e);
-    if (invented.length) {
-      ctx.log.warn('model quoted numbers not in the expedition — using fallback', { invented });
-      return fallbackRender(e);
-    }
-    if (text.length > DOSSIER_MAX_CHARS) {
-      ctx.log.warn('dossier over length — using fallback', { chars: text.length });
-      return fallbackRender(e);
-    }
-    return text;
+    if (!reply.trim()) throw new Error('empty completion');
   } catch (err) {
     ctx.log.warn('llm failed — using fallback dossier', { error: String(err) });
     return fallbackRender(e);
   }
+  const { copy, replaced } = composeCopy(reply, e);
+  if (replaced.length) {
+    ctx.log.warn('dossier fields replaced with the fallback', { id: e.id, replaced });
+  }
+  return renderDossier(e, copy);
 }
 
 /**
- * One root message and its thread. A rebuild of a window that already has a
- * message edits it instead (PLAN.md §2: new roots are for news). Quiet mode
- * keeps the row and skips the post; the plan is still there for `/watch`.
+ * The pitch as a root message, the dossier's sections as replies in its
+ * thread. A rebuild of a window that already has a message edits both in
+ * place (PLAN.md §2: new roots are for news). Quiet mode keeps the row and
+ * skips the post; the plan is still there for `/watch`.
  */
 async function publish(
   ctx: JobContext,
   e: Expedition,
-  dossier: string,
+  dossier: RenderedDossier,
   existing: { root_message_id: string | null; thread_id: string | null } | null,
 ): Promise<boolean> {
   const { db, poster, now, log } = ctx;
+  const key = kvDetailsKey(e.id);
   if (existing?.root_message_id) {
     log.info('rebuild of a posted expedition — editing in place', { id: e.id });
-    await poster.editMessage(existing.root_message_id, dossier);
+    await poster.editMessage(existing.root_message_id, dossier.root);
+    const old = parseIds(kvGet(db, key));
+    const ids: string[] = [];
+    for (const [i, body] of dossier.details.entries()) {
+      const prev = old[i];
+      if (prev && existing.thread_id) {
+        await poster.editThreadMessage(existing.thread_id, prev, body);
+        ids.push(prev);
+      } else {
+        const r = await poster.postThread(existing.thread_id, body);
+        if (r.messageId) ids.push(r.messageId);
+      }
+    }
+    // A section that no longer exists: say so rather than leave a stale plan up.
+    for (const stale of old.slice(dossier.details.length)) {
+      if (existing.thread_id) await poster.editThreadMessage(existing.thread_id, stale, '-# (superseded by the rebuild above)');
+    }
+    kvSet(db, key, JSON.stringify(ids));
     return true;
   }
   if (isQuiet(db, now)) {
     log.info('quiet mode — expedition saved, dossier not posted', { id: e.id });
     return false;
   }
-  const posted = await poster.postRoot(dossier);
+  const posted = await poster.postRoot(dossier.root);
   if (posted.suppressed) {
     log.warn('dossier root post suppressed — row kept', { id: e.id, reason: posted.reason });
     return false;
   }
+  let threadId: string | null = null;
   if (posted.messageId) {
-    const threadId = await poster.ensureThread(
+    threadId = await poster.ensureThread(
       posted.messageId,
       `${e.destination.name} ${fmtWindow(e.window)}`,
     );
@@ -427,7 +496,24 @@ async function publish(
       e.id,
     );
   }
+  // Dry runs have no thread; postThread prints the sections so the whole dossier is readable.
+  const ids: string[] = [];
+  for (const body of dossier.details) {
+    const r = await poster.postThread(threadId, body);
+    if (r.messageId && threadId) ids.push(r.messageId);
+  }
+  if (ids.length) kvSet(db, key, JSON.stringify(ids));
   return true;
+}
+
+function parseIds(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------- helpers */

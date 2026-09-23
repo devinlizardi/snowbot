@@ -42,12 +42,17 @@ const chalet: LodgingOption = {
   name: 'Hirafu Pine Chalet',
   type: 'vacation_rental',
   totalUsd: 4120,
+  unitTotalUsd: 4120,
+  units: 1,
   perNightUsd: 412,
   perPersonPerNightUsd: 82.4,
   rating: 4.7,
   reviews: 38,
   sleeps: 8,
+  bedrooms: 4,
+  highlights: [],
   link: null,
+  url: 'https://example.test/chalet',
   source: 'serpapi',
 };
 const lodgingSearch: LodgingSearch = {
@@ -56,6 +61,7 @@ const lodgingSearch: LodgingSearch = {
   checkOut: WINDOW.return,
   options: [chalet],
   pick: chalet,
+  shortlist: [{ ...chalet, role: 'pick' }],
   searchedAt: '2026-09-14T12:00:00Z',
 };
 

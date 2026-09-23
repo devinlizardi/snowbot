@@ -17,10 +17,13 @@ import type { LodgingOption, LodgingSearch, LodgingType } from './sources/lodgin
 import {
   groundTransportLookup,
   passStatusLookup,
+  resortSnowLookup,
   type GroundTransport,
   type LookupResult,
   type PassStatus,
+  type ResortSnow,
 } from './sources/lookup.js';
+import { fetchClimatology, type Climatology } from './sources/weather/climatology.js';
 import { buildSnowReport, type Confidence, type SnowReport } from './sources/weather/consensus.js';
 import { crosscheckFor } from './sources/weather/crosscheck.js';
 import { ecmwfAifs, ecmwfIfs } from './sources/weather/ecmwf.js';
@@ -56,6 +59,15 @@ export type ExpeditionInputs = {
   /** From the live lookup only. A null here becomes `passes.status: 'unverified'`. */
   passes: LookupResult<PassStatus> | null;
   weather: SnowReport;
+  /**
+   * What the snow usually does in this window: the archive's history and the
+   * resort's own average. Either may be null; absent entirely on inputs built
+   * before history existed.
+   */
+  climate?: {
+    history: Climatology | null;
+    resort: LookupResult<ResortSnow> | null;
+  };
   /** Anything else that contributed — a weathernext namespace, an archive row. */
   extraSources?: string[];
 };
@@ -72,12 +84,60 @@ export type ExpeditionLodging = {
   nights: number;
   perPersonPerNightUsd: number;
   perPersonUsd: number;
-  /** Whole property for the stay; null when only the band is known. */
+  /** The whole group's stay; null when only the band is known. */
   totalUsd: number | null;
   /** True when the number is the board's lodging band, not a priced listing. */
   estimated: boolean;
   link: string | null;
   note: string;
+  /** The pick and up to two alternatives, for the dossier's table. Empty on an estimate. */
+  options: ExpeditionLodgingOption[];
+};
+
+export type ExpeditionLodgingOption = {
+  /** 1-based; the table row and the link share it. */
+  n: number;
+  role: 'pick' | 'cheapest' | 'nicest' | 'alternative';
+  name: string;
+  type: LodgingType;
+  /** Rooms (hotel) or places (rental) booked for the group. */
+  units: number;
+  sleeps: number | null;
+  bedrooms: number | null;
+  perPersonPerNightUsd: number;
+  perPersonUsd: number;
+  totalUsd: number;
+  rating: number | null;
+  reviews: number | null;
+  highlights: string[];
+  url: string;
+};
+
+/**
+ * The snow story for a trip the forecast can't see yet. `mode` says which
+ * leads: `history` whenever the window starts past the forecast horizon
+ * (always, for a weekly build — the 21-day lead is longer than the 15-day
+ * forecast), `forecast` once the models reach it.
+ */
+export type ExpeditionClimate = {
+  mode: 'history' | 'forecast';
+  /** First day the trip's opening day falls inside the forecast. */
+  forecastVisibleFrom: string;
+  history: Climatology | null;
+  resort: ExpeditionResortSnow | null;
+};
+
+export type ExpeditionResortSnow = {
+  annualCm: number | null;
+  /** The same figure in metres, one decimal, so "15m a season" is a quotable number. */
+  annualM: number | null;
+  measuredWhere: string | null;
+  /** Average snowfall for the window's month(s), weighted by the days in each. */
+  windowMonthCm: number | null;
+  windowMonth: string;
+  snowiestMonth: string | null;
+  notes: string;
+  sources: string[];
 };
 
 export type ExpeditionGround =
@@ -125,6 +185,7 @@ export type Expedition = {
   ground: ExpeditionGround;
   passes: ExpeditionPasses;
   weather: { report: SnowReport; dayPlan: DayPlan[] };
+  climate: ExpeditionClimate;
   cost: {
     perMember: CostBreakdown[];
     /** Average over priced members. */
@@ -176,6 +237,7 @@ export function buildExpedition(inputs: ExpeditionInputs, cfg: Config, now: Date
     ground,
     passes,
     weather: { report: inputs.weather, dayPlan },
+    climate: climateFor(inputs, cfg, now),
     cost,
     volatility: volatilityFor(inputs.flights, window, now),
     confidence: inputs.weather.confidence,
@@ -205,13 +267,32 @@ function lodgingFor(
       perPersonUsd: Math.round(pick.perPersonPerNightUsd * nights),
       totalUsd: pick.totalUsd,
       estimated: false,
-      link: pick.link,
+      link: pick.url,
       note:
         `${pick.name}, $${Math.round(pick.totalUsd)} for ${nights} nights` +
+        (pick.units > 1 ? ` (${pick.units} rooms)` : '') +
         (pick.sleeps !== null
           ? `, sleeps ${pick.sleeps}`
-          : ', sleeps unknown — check before booking') +
+          : pick.type === 'hotel'
+            ? ''
+            : ', sleeps unknown — check before booking') +
         (pick.rating !== null ? `, rated ${pick.rating}` : ''),
+      options: (search?.shortlist ?? []).map((o, i) => ({
+        n: i + 1,
+        role: o.role,
+        name: o.name,
+        type: o.type,
+        units: o.units,
+        sleeps: o.sleeps,
+        bedrooms: o.bedrooms,
+        perPersonPerNightUsd: Math.round(o.perPersonPerNightUsd),
+        perPersonUsd: Math.round(o.perPersonPerNightUsd * nights),
+        totalUsd: Math.round(o.totalUsd),
+        rating: o.rating,
+        reviews: o.reviews,
+        highlights: o.highlights,
+        url: o.url,
+      })),
     };
   }
   const [lo, hi] = dest.lodging_band_usd_pp_night;
@@ -226,6 +307,71 @@ function lodgingFor(
     estimated: true,
     link: null,
     note: `no listing priced; using the board's $${lo}–$${hi}/pp/night band at its midpoint`,
+    options: [],
+  };
+}
+
+/* ------------------------------------------------------------ climate */
+
+const MONTH_KEYS = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+] as const;
+
+function climateFor(inputs: ExpeditionInputs, cfg: Config, now: Date): ExpeditionClimate {
+  const horizonDays = cfg.weather.open_meteo.forecast_days;
+  const today = now.toISOString().slice(0, 10);
+  const visibleFrom = shiftDate(inputs.window.start, -(horizonDays - 1));
+  return {
+    mode: today >= visibleFrom ? 'forecast' : 'history',
+    forecastVisibleFrom: visibleFrom,
+    history: inputs.climate?.history ?? null,
+    resort: resortSnowFor(inputs.climate?.resort ?? null, inputs.window),
+  };
+}
+
+export function resortSnowFor(
+  lookup: LookupResult<ResortSnow> | null,
+  window: DateWindow,
+): ExpeditionResortSnow | null {
+  if (!lookup) return null;
+  const d = lookup.data;
+  const counts = new Map<number, number>();
+  for (const date of datesIn(window)) {
+    const m = Number(date.slice(5, 7)) - 1;
+    counts.set(m, (counts.get(m) ?? 0) + 1);
+  }
+  const monthly = d.monthlySnowfallCm as Partial<Record<(typeof MONTH_KEYS)[number], number | null>>;
+  let weighted = 0;
+  let days = 0;
+  for (const [m, n] of counts) {
+    const v = monthly[MONTH_KEYS[m]!];
+    if (typeof v !== 'number') continue;
+    weighted += v * n;
+    days += n;
+  }
+  const startMonth = Number(window.start.slice(5, 7)) - 1;
+  const monthName = MONTH_KEYS[startMonth]!;
+  const annual = d.annualSnowfallCm === null ? null : Math.round(d.annualSnowfallCm);
+  return {
+    annualCm: annual,
+    annualM: annual === null ? null : Math.round(annual / 10) / 10,
+    measuredWhere: d.measuredWhere,
+    windowMonthCm: days > 0 ? Math.round(weighted / days) : null,
+    windowMonth: monthName[0]!.toUpperCase() + monthName.slice(1),
+    snowiestMonth: d.snowiestMonth,
+    notes: d.notes,
+    sources: lookup.sources,
   };
 }
 
@@ -465,6 +611,11 @@ function sourcesFor(inputs: ExpeditionInputs): string[] {
   }
   for (const m of inputs.weather.asOf.contributing) out.add(`open-meteo:${m}`);
   if (inputs.weather.asOf.weathernext) out.add('weathernext:bigquery');
+  if (inputs.climate?.history) out.add('open-meteo:archive');
+  if (inputs.climate?.resort) {
+    out.add('lookup:resort-snow');
+    for (const u of inputs.climate.resort.sources) out.add(u);
+  }
   for (const s of inputs.extraSources ?? []) out.add(s);
   return [...out];
 }
@@ -657,6 +808,15 @@ export async function gatherExpeditionInputs(
     summitElevationM: dest.summit_elevation_m,
   });
 
+  const history = await attempt(ctx, 'climatology', () =>
+    fetchClimatology(ctx, dest, chosen, { offline: get.offline }),
+  );
+  const resort = await attempt(
+    ctx,
+    'resort snow lookup',
+    async () => (await cached(db, resortSnowLookup(ctx.llm), { resort: dest.name }, get)).value,
+  );
+
   return {
     dest,
     window: chosen,
@@ -665,6 +825,7 @@ export async function gatherExpeditionInputs(
     ground,
     passes,
     weather,
+    climate: { history, resort },
   };
 }
 
