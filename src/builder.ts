@@ -1,4 +1,4 @@
-import type { Config, Destination } from './config.js';
+import type { Config, Destination, Quote } from './config.js';
 import type { DB } from './db.js';
 import type { JobContext } from './jobs/_runner.js';
 import { originsToPrice, solveRouting, type Routing } from './routing.js';
@@ -195,6 +195,8 @@ export type Expedition = {
     overCeiling: boolean;
   };
   volatility: { note: string; decideBy: string };
+  /** The real quote under the header: the destination's own, else one from the pool. */
+  quote: Quote | null;
   confidence: Confidence;
   /** Every cache namespace and URL that contributed. */
   sources: string[];
@@ -240,6 +242,7 @@ export function buildExpedition(inputs: ExpeditionInputs, cfg: Config, now: Date
     climate: climateFor(inputs, cfg, now),
     cost,
     volatility: volatilityFor(inputs.flights, window, now),
+    quote: quoteFor(dest, cfg, expeditionId(dest, window)),
     confidence: inputs.weather.confidence,
     sources: sourcesFor(inputs),
     asOf: now.toISOString(),
@@ -248,6 +251,18 @@ export function buildExpedition(inputs: ExpeditionInputs, cfg: Config, now: Date
 
 export function expeditionId(dest: Destination, window: DateWindow): string {
   return `${dest.id}-${window.start.slice(5, 7)}${window.start.slice(8, 10)}`;
+}
+
+/* -------------------------------------------------------------- quote */
+
+/** The destination's own quote; otherwise a pool quote picked stably by expedition id. */
+export function quoteFor(dest: Destination, cfg: Config, id: string): Quote | null {
+  if (dest.pitch.quote) return dest.pitch.quote;
+  const pool = cfg.expedition.quote_pool;
+  if (pool.length === 0) return null;
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return pool[h % pool.length]!;
 }
 
 /* ------------------------------------------------------------ lodging */

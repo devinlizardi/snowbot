@@ -181,17 +181,34 @@ export class Poster {
     if (msg && !msg.pinned) await msg.pin();
   }
 
-  /** Create the thread hanging off a root message, or return the existing one. */
+  /**
+   * Create the thread hanging off a root message, or return the existing one.
+   * Live, this never returns null: a message the bot can't read back, or a
+   * thread it isn't allowed to start, is an error that names the permission —
+   * it used to be a silent null, and every thread reply after it vanished.
+   */
   async ensureThread(messageId: string, name: string): Promise<string | null> {
     if (this.opts.dryRun || !this.client) {
       log.info('[dry-run] would open thread', { messageId, name });
       return null;
     }
     const msg = await this.fetchMessage(messageId);
-    if (!msg) return null;
+    if (!msg) {
+      throw new Error(
+        `can't read back message ${messageId} to open its thread — the bot needs ` +
+          `Read Message History in channel ${this.channelId}`,
+      );
+    }
     if (msg.hasThread && msg.thread) return msg.thread.id;
-    const thread = await msg.startThread({ name: name.slice(0, 100), autoArchiveDuration: 10080 });
-    return thread.id;
+    try {
+      const thread = await msg.startThread({ name: name.slice(0, 100), autoArchiveDuration: 10080 });
+      return thread.id;
+    } catch (err) {
+      throw new Error(
+        `couldn't start a thread on ${messageId} (${String(err)}) — the bot needs ` +
+          `Create Public Threads and Send Messages in Threads in channel ${this.channelId}`,
+      );
+    }
   }
 
   /** Edit a message that lives in a thread (a channel `editMessage` can't see into). */
@@ -212,6 +229,14 @@ export class Poster {
 
   /** Thread replies are unbudgeted: they don't ping the channel. */
   async postThread(threadId: string | null, content: string): Promise<PostResult> {
+    if (!this.opts.dryRun && this.client && !threadId) {
+      // Live with nowhere to post: say so loudly and leave a trace in `posts`,
+      // rather than logging it as if it were a dry run.
+      const reason = 'no thread to post into';
+      log.error('thread reply dropped', { job: this.opts.job, reason, chars: content.length });
+      this.record('suppressed', null, `${reason}: ${content.slice(0, 120)}`);
+      return { messageId: null, suppressed: true, reason };
+    }
     if (this.opts.dryRun || !this.client || !threadId) {
       log.info('[dry-run] would post in thread', { threadId, chars: content.length });
       console.log(divider(`THREAD ${threadId ?? '(new)'}`, this.opts.target), '\n' + content + '\n');

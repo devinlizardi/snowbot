@@ -21,6 +21,20 @@ const PointSchema = z.object({
   elevation_m: z.number().int(),
 });
 
+/**
+ * A real quote, verbatim, with who said it and where. Hand-curated and
+ * checked against a source before it goes in config.yaml — the model never
+ * writes one. `translation: ours` marks a line translated for the bot (the
+ * original is public domain; published translations usually aren't).
+ */
+const QuoteSchema = z.object({
+  text: z.string().min(1),
+  by: z.string().min(1),
+  source: z.string().default(''),
+  original: z.string().optional(),
+  translation: z.enum(['ours']).optional(),
+});
+
 const DestinationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -46,6 +60,7 @@ const DestinationSchema = z.object({
       terrain: z.array(z.string()).default([]),
       off_snow: z.array(z.string()).default([]),
       heads_up: z.array(z.string()).default([]),
+      quote: QuoteSchema.optional(),
     })
     .default({ hook: '', terrain: [], off_snow: [], heads_up: [] }),
 });
@@ -148,6 +163,8 @@ const ConfigSchema = z
           end: z.string().regex(/^\d{2}-\d{2}$/, 'expected MM-DD').default('04-15'),
         })
         .default({ start: '12-01', end: '04-15' }),
+      // Used under the header when a destination has no quote of its own.
+      quote_pool: z.array(QuoteSchema).default([]),
       ranking_weights: z.object({
         historical_snow: z.number(),
         forecast_snow_10d_confidence_weighted: z.number(),
@@ -189,6 +206,7 @@ const ConfigSchema = z
 export type RawConfig = z.infer<typeof ConfigSchema>;
 export type Destination = z.infer<typeof DestinationSchema>;
 export type Point = z.infer<typeof PointSchema>;
+export type Quote = z.infer<typeof QuoteSchema>;
 
 /** A roster member with env indirection already resolved. */
 export type Member = {

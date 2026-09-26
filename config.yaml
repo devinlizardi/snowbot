@@ -135,6 +135,16 @@ expedition:
   season:
     start: 12-01
     end: 04-15
+  # Real quotes for the line under a dossier's header, used when a destination
+  # has no `pitch.quote` of its own. Same rules as there: verbatim, attributed,
+  # checked against a source before it goes in.
+  quote_pool:
+    - text: "The mountains are calling and I must go."
+      by: "John Muir"
+      source: "letter to his sister Sarah, 1873"
+    - text: "If you don't do it this year, you will be one year older when you do."
+      by: "Warren Miller"
+      source: "ski filmmaker"
   # A weekly build's window is always past the 15-day forecast, so what usually
   # falls in that window leads; what's falling now is a smaller snowpack read.
   ranking_weights:
@@ -157,6 +167,11 @@ expedition:
 #   terrain   what the riding is like
 #   off_snow  what the days and nights off look like (onsen, food, après)
 #   heads_up  the honest caveats a friend would mention
+#   quote     optional: a REAL quote for under the header — verbatim, with who
+#             said it and where, checked against a source. The model never
+#             writes these. `translation: ours` for a public-domain original we
+#             translated ourselves (published translations are usually
+#             copyrighted). Destinations without one draw from quote_pool.
 board:
   - id: niseko
     name: Niseko United
@@ -183,6 +198,12 @@ board:
         - "Mt. Yōtei towering over the valley"
       heads_up:
         - "Hirafu is busy in peak season — book dinners ahead"
+      quote:
+        text: "Well then, let's go snow-viewing — till we tumble down."
+        by: "Matsuo Bashō"
+        source: "haiku"
+        original: "いざ行かむ雪見にころぶ所まで"
+        translation: "ours"
   - id: rusutsu
     name: Rusutsu
     region: JP
@@ -256,6 +277,12 @@ board:
         - "The Dosojin fire festival every January 15"
       heads_up:
         - "Shinkansen then a bus from Tokyo — easy, but a transfer"
+      quote:
+        text: "So this is it — my home at last? Five feet of snow."
+        by: "Kobayashi Issa"
+        source: "1812, coming home to Kashiwabara in the Shinano snow country, a few valleys from Nozawa"
+        original: "是がまあつひの栖か雪五尺"
+        translation: "ours"
   - id: whistler
     name: Whistler Blackcomb
     region: CA
@@ -329,6 +356,10 @@ board:
         - "A walk on frozen Lake Louise"
       heads_up:
         - "It gets properly cold in midwinter — pack for it"
+      quote:
+        text: "Since we can't export the scenery, we'll have to import the tourists."
+        by: "William Cornelius Van Horne"
+        source: "president of the Canadian Pacific Railway, which built the Banff Springs Hotel"
   - id: fernie
     name: Fernie Alpine Resort
     region: CA
@@ -377,6 +408,10 @@ board:
         - "Grand Teton views all day"
       heads_up:
         - "An expert-heavy mountain; Teton Village lodging runs pricey"
+      quote:
+        text: "Someday someone will ski that."
+        by: "Barry Corbet"
+        source: "looking up at the couloir that now carries his name, 1960"
   - id: big-sky
     name: Big Sky
     region: US
@@ -450,6 +485,10 @@ board:
         - "Reno within an hour"
       heads_up:
         - "Sierra snow is heavy, and big storms can close the roads"
+      quote:
+        text: "I thought it must surely be the fairest picture the whole earth affords."
+        by: "Mark Twain"
+        source: "on Lake Tahoe, Roughing It (1872)"
   - id: chamonix
     name: Chamonix
     region: EU
@@ -476,6 +515,10 @@ board:
       heads_up:
         - "Glacier terrain needs a guide"
         - "The areas are spread out — the valley bus links them"
+      quote:
+        text: "Mont Blanc yet gleams on high:—the power is there"
+        by: "Percy Bysshe Shelley"
+        source: "Mont Blanc: Lines Written in the Vale of Chamouni (1817)"
   - id: zermatt
     name: Zermatt
     region: EU
@@ -500,6 +543,10 @@ board:
         - "Mountain-hut lunches worth planning a day around"
       heads_up:
         - "Switzerland is expensive, on and off the mountain"
+      quote:
+        text: "Climb if you will, but remember that courage and strength are nought without prudence, and that a momentary negligence may destroy the happiness of a lifetime."
+        by: "Edward Whymper"
+        source: "first to summit the Matterhorn, Scrambles Amongst the Alps (1871)"
   - id: st-anton
     name: St. Anton am Arlberg
     region: EU

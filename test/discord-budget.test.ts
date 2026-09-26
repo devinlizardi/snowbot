@@ -71,3 +71,46 @@ describe('root-post budget', () => {
     if (saved) process.env.DISCORD_BOT_TOKEN = saved;
   });
 });
+
+describe('threads, live', () => {
+  /** A live poster whose Discord client is a stub: enough to reach the thread code paths. */
+  function live(message: unknown) {
+    const p = new Poster(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    const channel = {
+      isTextBased: () => true,
+      isDMBased: () => false,
+      messages: {
+        fetch: async () => {
+          if (message === undefined) throw new Error('Missing Access');
+          return message;
+        },
+      },
+    };
+    (p as unknown as { client: unknown }).client = { channels: { fetch: async () => channel } };
+    return p;
+  }
+
+  it('drops nothing silently: a live reply with no thread is recorded as suppressed', async () => {
+    const r = await live({}).postThread(null, '✈️ Getting there');
+    expect(r).toMatchObject({ suppressed: true, reason: 'no thread to post into' });
+    const row = db.prepare(`SELECT kind, summary FROM posts`).get() as { kind: string; summary: string };
+    expect(row.kind).toBe('suppressed');
+    expect(row.summary).toMatch(/^no thread to post into: ✈️/);
+  });
+
+  it('names Read Message History when the bot cannot read its own post back', async () => {
+    await expect(live(undefined).ensureThread('m1', 'Niseko')).rejects.toThrow(/Read Message History/);
+  });
+
+  it('names the thread permissions when Discord refuses to start one', async () => {
+    const msg = {
+      hasThread: false,
+      startThread: async () => {
+        throw new Error('Missing Permissions');
+      },
+    };
+    await expect(live(msg).ensureThread('m1', 'Niseko')).rejects.toThrow(
+      /Missing Permissions.*Create Public Threads and Send Messages in Threads/,
+    );
+  });
+});

@@ -398,6 +398,35 @@ describe('expedition climate', () => {
   });
 });
 
+describe('quotes', () => {
+  it("uses the destination's own quote, else a pool quote chosen stably by id, else none", () => {
+    expect(buildExpedition(nisekoInputs(), cfg, NOW).quote?.by).toBe('Matsuo Bashō');
+    const whistler = by('whistler');
+    const a = buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote;
+    const b = buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote;
+    expect(cfg.expedition.quote_pool).toContainEqual(a);
+    expect(b).toEqual(a);
+    cfg.expedition.quote_pool = [];
+    expect(buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote).toBeNull();
+    expect(fallbackRender(buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW)).root).not.toMatch(/^> /m);
+  });
+
+  it('every quote in config is attributed', () => {
+    const all = [...cfg.board.flatMap((d) => (d.pitch.quote ? [d.pitch.quote] : [])), ...cfg.expedition.quote_pool];
+    expect(all.length).toBeGreaterThanOrEqual(9);
+    for (const q of all) {
+      expect(q.by.trim()).not.toBe('');
+      expect(q.source.trim()).not.toBe('');
+      if (q.translation === 'ours') expect(q.original).toBeTruthy();
+    }
+  });
+
+  it('shows the model the quote so the hook does not repeat it', () => {
+    const t = trimForPrompt(buildExpedition(nisekoInputs(), cfg, NOW));
+    expect(t.quote?.by).toBe('Matsuo Bashō');
+  });
+});
+
 describe('dossier prompt + fallback', () => {
   it('trims the raw quotes out of what the model sees and hands it the pitch and the history', () => {
     const e = buildExpedition(nisekoInputs(), cfg, NOW);
@@ -429,7 +458,11 @@ describe('dossier prompt + fallback', () => {
     expect(headerLine(e)).toMatch(
       /^🇯🇵 NISEKO UNITED — Feb 6–15 — \$[\d,]+\/person — 10 days \(6 on snow\)$/,
     );
-    expect(d.root).toContain(`> *${e.destination.pitch.hook}*`);
+    // A real, attributed quote sits under the header; the hook is our own line below it.
+    expect(d.root).toContain(
+      '\n> *“Well then, let\'s go snow-viewing — till we tumble down.”*\n> — Matsuo Bashō, haiku; our translation\n',
+    );
+    expect(d.root).toContain(`\n*${e.destination.pitch.hook}*\n`);
     expect(d.root).toContain('❄️ **The snow**');
     expect(d.root).toContain('💸 **All-in** — **$');
     expect(d.root).toContain('at Hirafu Pine Chalet');
@@ -546,7 +579,8 @@ describe('composeCopy', () => {
     expect(out.replaced).toEqual([]);
     expect(out.copy).toEqual(copy);
     const d = renderDossier(e, out.copy);
-    expect(d.root).toContain('> *Siberia keeps loading the cannon');
+    expect(d.root).toContain('\n*Siberia keeps loading the cannon');
+    expect(d.root).not.toContain('> *Siberia');
     expect(d.details[2]).toContain('• **Sat 6** — travel day');
   });
 
@@ -819,6 +853,64 @@ describe('runExpeditionBuild', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('a rebuild opens the thread a post never got, then posts every section into it', async () => {
+    const calls: string[] = [];
+    class FakePoster extends Poster {
+      override get connected() {
+        return true;
+      }
+      override async editMessage(id: string) {
+        calls.push(`edit:${id}`);
+        return { messageId: id, suppressed: false };
+      }
+      override async ensureThread(id: string) {
+        calls.push(`thread-for:${id}`);
+        return 'thread-9';
+      }
+      override async postThread(threadId: string | null) {
+        calls.push(`thread:${threadId}`);
+        return { messageId: `d-${calls.length}`, suppressed: false };
+      }
+    }
+    const poster = new FakePoster(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    const e = buildExpedition(nisekoInputs(), cfg, NOW);
+    db.prepare(
+      `INSERT INTO expeditions (id, destination, window_start, window_end, days_total, days_on_snow,
+         plan_json, total_pp_usd, confidence, status, root_message_id, thread_id)
+       VALUES (?, 'niseko', ?, ?, 10, 6, '{}', 1800, 'high', 'proposed', 'root-7', NULL)`,
+    ).run(e.id, e.window.start, e.window.end);
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko', month: '2027-02' }));
+    inputsFor = () => nisekoInputs();
+    await runExpeditionBuild(ctx({ poster }), deps());
+    expect(calls).toEqual([
+      'edit:root-7',
+      'thread-for:root-7',
+      'thread:thread-9',
+      'thread:thread-9',
+      'thread:thread-9',
+    ]);
+    expect(expeditions()[0]!.thread_id).toBe('thread-9');
+  });
+
+  it('fails the job, not silently, when the thread sections cannot be posted', async () => {
+    class NoThreads extends Poster {
+      override async postRoot() {
+        return { messageId: 'root-1', suppressed: false };
+      }
+      override async ensureThread() {
+        return null;
+      }
+      override async postThread() {
+        return { messageId: null, suppressed: true, reason: 'no thread to post into' };
+      }
+    }
+    const poster = new NoThreads(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
+    await expect(runExpeditionBuild(ctx({ poster }), deps())).rejects.toThrow(
+      /posted the pitch but not the thread sections \(no thread to post into\).*Read Message History/,
+    );
   });
 
   it('a rebuild edits the root and every thread section in place', async () => {

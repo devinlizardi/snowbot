@@ -88,7 +88,7 @@ Every dollar figure, snow amount (cm or m), percentage and "N of M" count you wr
 
 WHAT TO RETURN
 Only a JSON object, no code fences, with exactly these fields. The bot draws the flight table, the lodging table, the links, the header and the price line itself; your job is the words around them. Discord markdown inside strings (**bold**, *italic*) is fine; no headings, links, tables or emoji beyond one or two that earn their place.
-- hook (≤${COPY_LIMITS.hook} chars): one line, the reason to go. Not the name and dates; the header has those.
+- hook (≤${COPY_LIMITS.hook} chars): one line, the reason to go, in your own voice. Not the name and dates; the header has those. The bot prints a real, attributed quote (the "quote" field) just above your hook, so never write your own quotation or attribute words to anyone, and don't repeat the quote.
 - pitch (≤${COPY_LIMITS.pitch} chars): 2–4 sentences making the case: why this place, why these dates, what the trip feels like.
 - snow (≤${COPY_LIMITS.snow} chars): the snow story, per THE SNOW.
 - flightsNote (≤${COPY_LIMITS.flightsNote} chars): why the routing works: who flies from where, anyone who should drive to a hub and why, how close together everyone lands. It sits under the flight table; don't repeat the table row by row. The per-member delta lines are printed separately.
@@ -111,6 +111,7 @@ export function trimForPrompt(e: Expedition) {
   return {
     id: e.id,
     headerLine: headerLine(e),
+    quote: e.quote ? { text: e.quote.text, by: e.quote.by } : null,
     watchCommand: `/watch ${e.id}`,
     destination: {
       id: e.destination.id,
@@ -369,7 +370,8 @@ function rootParts(e: Expedition, c: DossierCopy): Part[] {
   const catchLine = c.catch.replace(/\s*Decide by [\d-]+\.?$/, '');
   return [
     { key: 'header', text: `**${headerLine(e)}**` },
-    { key: 'hook', text: `> *${c.hook}*` },
+    ...(e.quote ? [{ key: 'quote', text: quoteBlock(e.quote) }] : []),
+    { key: 'hook', text: `*${c.hook}*` },
     { key: 'pitch', text: `\n${c.pitch}` },
     { key: 'snow', text: `\n❄️ **The snow** — ${c.snow}` },
     { key: 'damage', text: `💸 **All-in** — ${damageLine(e)}` },
@@ -461,6 +463,12 @@ function fitMessage(parts: Part[], shrink: string[]): string {
     text = join();
   }
   return clamp(text, DOSSIER_MAX_CHARS);
+}
+
+/** A real quote as a Discord block quote, with its attribution on the second line. */
+export function quoteBlock(q: NonNullable<Expedition['quote']>): string {
+  const where = [q.source, q.translation === 'ours' ? 'our translation' : ''].filter(Boolean).join('; ');
+  return `> *“${q.text}”*\n> — ${q.by}${where ? `, ${where}` : ''}`;
 }
 
 /* -------------------------------------------------------------- tables */

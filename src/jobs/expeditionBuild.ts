@@ -456,21 +456,31 @@ async function publish(
   if (existing?.root_message_id) {
     log.info('rebuild of a posted expedition — editing in place', { id: e.id });
     await poster.editMessage(existing.root_message_id, dossier.root);
-    const old = parseIds(kvGet(db, key));
+    // A post whose thread never got made (the old silent failure) gets one now.
+    let threadId = existing.thread_id;
+    if (!threadId && poster.connected) {
+      threadId = await poster.ensureThread(
+        existing.root_message_id,
+        `${e.destination.name} ${fmtWindow(e.window)}`,
+      );
+      db.prepare(`UPDATE expeditions SET thread_id = ? WHERE id = ?`).run(threadId, e.id);
+    }
+    const old = threadId === existing.thread_id ? parseIds(kvGet(db, key)) : [];
     const ids: string[] = [];
     for (const [i, body] of dossier.details.entries()) {
       const prev = old[i];
-      if (prev && existing.thread_id) {
-        await poster.editThreadMessage(existing.thread_id, prev, body);
+      if (prev && threadId) {
+        await poster.editThreadMessage(threadId, prev, body);
         ids.push(prev);
       } else {
-        const r = await poster.postThread(existing.thread_id, body);
+        const r = await poster.postThread(threadId, body);
+        assertThreadPosted(r, e);
         if (r.messageId) ids.push(r.messageId);
       }
     }
     // A section that no longer exists: say so rather than leave a stale plan up.
     for (const stale of old.slice(dossier.details.length)) {
-      if (existing.thread_id) await poster.editThreadMessage(existing.thread_id, stale, '-# (superseded by the rebuild above)');
+      if (threadId) await poster.editThreadMessage(threadId, stale, '-# (superseded by the rebuild above)');
     }
     kvSet(db, key, JSON.stringify(ids));
     return true;
@@ -500,10 +510,21 @@ async function publish(
   const ids: string[] = [];
   for (const body of dossier.details) {
     const r = await poster.postThread(threadId, body);
+    assertThreadPosted(r, e);
     if (r.messageId && threadId) ids.push(r.messageId);
   }
   if (ids.length) kvSet(db, key, JSON.stringify(ids));
   return true;
+}
+
+/** The pitch without its tables is half a dossier: fail the job so job_runs shows it. */
+function assertThreadPosted(r: { suppressed: boolean; reason?: string }, e: Expedition): void {
+  if (r.suppressed) {
+    throw new Error(
+      `${e.id}: posted the pitch but not the thread sections (${r.reason ?? 'suppressed'}) — ` +
+        'check the bot has Read Message History, Create Public Threads and Send Messages in Threads',
+    );
+  }
 }
 
 function parseIds(raw: string | undefined): string[] {
