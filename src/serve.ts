@@ -5,6 +5,7 @@ import { kvGet, kvSet, openDb, type DB } from './db.js';
 import { attachInteractionHandler, type CommandAction } from './discord/commands.js';
 import type { Job } from './jobs/_runner.js';
 import { runJob } from './jobs/_runner.js';
+import { KV_LAST_STATUS } from './jobs/aspenUpdate.js';
 import { buildReply, KV_LAST_BUILD, type LastBuild } from './jobs/expeditionBuild.js';
 import { log } from './logger.js';
 import { runSnapshot } from './snapshot.js';
@@ -46,8 +47,8 @@ export function lastRuns(db: DB): LastRun[] {
  * bare snowflake is skipped — same rule `commands.ts` applies.
  */
 export function tripText(db: DB): string | undefined {
-  const briefing = kvGet(db, 'aspen:last_briefing');
-  if (briefing?.trim()) return briefing;
+  const status = kvGet(db, KV_LAST_STATUS);
+  if (status?.trim()) return status;
   const rows = db
     .prepare(`SELECT value FROM kv WHERE key LIKE 'anchor:%' ORDER BY updated_at DESC, key`)
     .all() as { value: string }[];

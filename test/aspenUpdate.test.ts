@@ -9,6 +9,7 @@ import {
   composeStatus,
   isDue,
   KV_LAST_BRIEFING,
+  KV_LAST_STATUS,
   materialChange,
   packingList,
   reportWindow,
@@ -468,6 +469,8 @@ describe('runAspenUpdate', () => {
       cadence: 'daily',
       totalCm: 28,
     });
+    // /trip reads this, not the JSON snapshot above
+    expect(kvGet(db, KV_LAST_STATUS)).toMatch(/^❄️ \*\*ASPEN\*\*/);
     // The base-depth lookup is asked for and skipped without a key; nothing throws.
     expect(calls).toContain('lookup:base-depth');
     expect(calls).not.toContain('weathernext:bigquery');

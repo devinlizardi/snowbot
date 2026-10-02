@@ -68,7 +68,10 @@ const HORIZON_DAYS = 15;
 const ASPEN_UTC_OFFSET_HOURS = -7;
 const WEATHERNEXT_HOURS = 360;
 
+/** Change-detection snapshot (JSON). Not display text — `/trip` must not echo it. */
 export const KV_LAST_BRIEFING = 'aspen:last_briefing';
+/** The rendered anchor text, kept so `/trip` can echo exactly what is pinned. */
+export const KV_LAST_STATUS = 'aspen:last_status';
 export const kvLastPostKey = (cadence: Cadence) => `aspen:last_post_${cadence}`;
 
 /* --------------------------------------------------------------- cadence */
@@ -399,7 +402,8 @@ export async function runAspenUpdate(ctx: JobContext, deps: AspenDeps): Promise<
 
   const body = await writeBody(ctx, deps, briefing);
   const status = { ...composeStatus(briefing, tz), headline: body };
-  const anchor = await upsertAnchor({ poster, db, cfg, log }, renderAnchor(status));
+  const anchorText = renderAnchor(status);
+  const anchor = await upsertAnchor({ poster, db, cfg, log }, anchorText);
 
   const prev = readSnapshot(db);
   const next = snapshotOf(briefing);
@@ -424,6 +428,7 @@ export async function runAspenUpdate(ctx: JobContext, deps: AspenDeps): Promise<
   }
 
   kvSet(db, KV_LAST_BRIEFING, JSON.stringify(next));
+  kvSet(db, KV_LAST_STATUS, anchorText);
   kvSet(db, kvLastPostKey(cadence), now.toISOString());
 }
 
