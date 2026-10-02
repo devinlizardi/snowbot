@@ -396,7 +396,7 @@ function trip(ctx: CommandContext): CommandResult {
     .all() as { value: string }[];
   const content = rows
     .map((r) => r.value)
-    .find((v) => v.trim().length > 0 && !/^\d{15,22}$/.test(v.trim()));
+    .find((v) => v.trim().length > 0 && !/^(\d{15,22}|dry-run:.*)$/.test(v.trim()));
   return ok(content ?? 'no status yet', { action: { kind: 'trip' } });
 }
 

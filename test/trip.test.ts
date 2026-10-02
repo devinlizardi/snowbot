@@ -19,4 +19,10 @@ describe('tripText (/trip)', () => {
     kvSet(db, KV_LAST_BRIEFING, JSON.stringify({ cadence: 'monthly', totalCm: null }));
     expect(tripText(db)).toBeUndefined();
   });
+
+  it('ignores anchor message ids, including dry-run placeholders', () => {
+    kvSet(db, 'anchor:test-channel', 'dry-run:mu4qzpov-uf9mgs');
+    kvSet(db, 'anchor:other', '123456789012345678');
+    expect(tripText(db)).toBeUndefined();
+  });
 });

@@ -42,17 +42,15 @@ export function lastRuns(db: DB): LastRun[] {
 }
 
 /**
- * `/trip` echoes the anchor text the aspenUpdate job leaves in kv. The
- * anchor's own `anchor:<channel>` key holds a message id, not prose, so a
- * bare snowflake is skipped — same rule `commands.ts` applies.
+ * `/trip` echoes the rendered Aspen status the aspenUpdate job leaves in kv
+ * under `aspen:last_status`.
  */
 export function tripText(db: DB): string | undefined {
+  // The only prose source is the rendered status the aspenUpdate job saves.
+  // `anchor:*` keys hold message ids (real snowflakes or `dry-run:` markers),
+  // never content, so they are not a fallback.
   const status = kvGet(db, KV_LAST_STATUS);
-  if (status?.trim()) return status;
-  const rows = db
-    .prepare(`SELECT value FROM kv WHERE key LIKE 'anchor:%' ORDER BY updated_at DESC, key`)
-    .all() as { value: string }[];
-  return rows.map((r) => r.value).find((v) => v.trim().length > 0 && !/^\d{15,22}$/.test(v.trim()));
+  return status?.trim() ? status : undefined;
 }
 
 export type ServeOptions = {
