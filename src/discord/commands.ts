@@ -30,7 +30,7 @@ export type CommandContext = {
 };
 
 export type CommandAction =
-  { kind: 'build'; destination?: string; month?: string } | { kind: 'trip' };
+  { kind: 'build'; destination?: string; month?: string } | { kind: 'trip' } | { kind: 'snapshot' };
 
 export type CommandResult = {
   reply: string;
@@ -38,7 +38,7 @@ export type CommandResult = {
   action?: CommandAction;
 };
 
-export type CommandOpts = Record<string, string | number | undefined>;
+export type CommandOpts = Record<string, string | number | boolean | undefined>;
 
 /* ---------------------------------------------------------- definitions */
 
@@ -107,6 +107,15 @@ export const COMMANDS = [
     .addSubcommand((s) => s.setName('list').setDescription("Everyone's upcoming flights")),
 
   new SlashCommandBuilder().setName('trip').setDescription('Aspen status right now'),
+
+  new SlashCommandBuilder()
+    .setName('snapshot')
+    .setDescription(
+      'Weather at every spot we track, next 7 days — where the models agree and split',
+    )
+    .addBooleanOption((o) =>
+      o.setName('private').setDescription('Only you see the reply').setRequired(false),
+    ),
 
   new SlashCommandBuilder()
     .setName('build')
@@ -391,6 +400,18 @@ function trip(ctx: CommandContext): CommandResult {
   return ok(content ?? 'no status yet', { action: { kind: 'trip' } });
 }
 
+/**
+ * A reply to whoever asked, not a post: it doesn't touch the root-post budget
+ * and `/quiet` doesn't hold it back. Public by default, since people mostly
+ * want to show the group; `private:true` makes it ephemeral.
+ */
+function snapshot(opts: CommandOpts): CommandResult {
+  return ok('Pulling every forecast for every spot…', {
+    action: { kind: 'snapshot' },
+    ...(opts.private === true ? { ephemeral: true } : {}),
+  });
+}
+
 function build(opts: CommandOpts, ctx: CommandContext): CommandResult {
   const destination = str(opts, 'destination')?.toLowerCase() || undefined;
   const month = str(opts, 'month') || undefined;
@@ -462,6 +483,8 @@ export async function handle(
       return flight(sub, opts, ctx);
     case 'trip':
       return trip(ctx);
+    case 'snapshot':
+      return snapshot(opts);
     case 'build':
       return build(opts, ctx);
     case 'watch':
@@ -518,7 +541,13 @@ function optionsOf(interaction: ChatInputCommandInteraction): {
     data = first.options ?? [];
   }
   for (const o of data) {
-    if (typeof o.value === 'string' || typeof o.value === 'number') opts[o.name] = o.value;
+    if (
+      typeof o.value === 'string' ||
+      typeof o.value === 'number' ||
+      typeof o.value === 'boolean'
+    ) {
+      opts[o.name] = o.value;
+    }
   }
   return { sub, opts };
 }

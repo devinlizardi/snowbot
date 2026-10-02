@@ -49,6 +49,7 @@ describe('definitions', () => {
       'flight',
       'join',
       'quiet',
+      'snapshot',
       'trip',
       'unwatch',
       'watch',
@@ -303,6 +304,29 @@ describe('/trip', () => {
     const r = await handle('trip', null, {}, m1());
     expect(r.reply).toBe('❄️ ASPEN · 54 days out');
     expect(r.action).toEqual({ kind: 'trip' });
+  });
+});
+
+describe('/snapshot', () => {
+  it('hands off to the snapshot action, as a public reply by default', async () => {
+    const r = await handle('snapshot', null, {}, stranger());
+    expect(r.action).toEqual({ kind: 'snapshot' });
+    expect(r.ephemeral).toBeUndefined();
+  });
+
+  it('replies only to the asker with private:true', async () => {
+    const r = await handle('snapshot', null, { private: true }, stranger());
+    expect(r).toMatchObject({ action: { kind: 'snapshot' }, ephemeral: true });
+    expect(
+      (await handle('snapshot', null, { private: false }, stranger())).ephemeral,
+    ).toBeUndefined();
+  });
+
+  it('declares private as a real boolean option', () => {
+    const def = COMMANDS.find((c) => c.name === 'snapshot')!.toJSON();
+    expect(def.options).toEqual([
+      expect.objectContaining({ name: 'private', type: 5, required: false }),
+    ]);
   });
 });
 

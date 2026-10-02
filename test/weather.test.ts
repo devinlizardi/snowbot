@@ -6,7 +6,7 @@ import { parseArchive, trailingWeek } from '../src/sources/weather/archive.js';
 import { parseSeasonal } from '../src/sources/weather/seasonal.js';
 import { crosscheckFor, gfs, nam, iconEu, iconGlobal } from '../src/sources/weather/crosscheck.js';
 import { ecmwfIfs } from '../src/sources/weather/ecmwf.js';
-import { summarize } from '../src/sources/weather/types.js';
+import { summarize, utcOffsetHoursOf } from '../src/sources/weather/types.js';
 
 const ASPEN = { lat: 39.2084, lon: -106.949, label: 'base', elevationM: 2422 };
 
@@ -72,6 +72,12 @@ describe('parseForecast', () => {
     expect(f.days[0]?.freezingLevelM).toBeNull();
   });
 
+  it("keeps the resort's UTC offset when Open-Meteo reports one", () => {
+    const f = parseForecast({ ...sample, utc_offset_seconds: 32400 }, 'ecmwf_ifs025', ASPEN);
+    expect(f.utcOffsetSeconds).toBe(32400);
+    expect(parseForecast(sample, 'ecmwf_ifs025', ASPEN)).not.toHaveProperty('utcOffsetSeconds');
+  });
+
   it('survives a response with no daily block at all', () => {
     const f = parseForecast({}, 'gfs_seamless', ASPEN);
     expect(f.days).toEqual([]);
@@ -115,6 +121,11 @@ describe('summarize', () => {
     expect(summarize(f, '2027-01-24', '2027-01-26', 2422).rainRiskAtBase).toBe(true);
     // Same forecast, a base high above every freezing level: no rain risk.
     expect(summarize(f, '2027-01-24', '2027-01-26', 3500).rainRiskAtBase).toBe(false);
+  });
+
+  it('needs something to fall before it calls a warm day a rain risk', () => {
+    // Jan 25: freezing level 3100m, 0.1mm — a warm afternoon, not rain.
+    expect(summarize(f, '2027-01-25', '2027-01-25', 2422).rainRiskAtBase).toBe(false);
   });
 
   it('stays silent about rain risk when no base elevation is given', () => {
@@ -215,5 +226,20 @@ describe.skipIf(recorded.length === 0)('recorded live responses', () => {
     // A summary over the real window must not throw or produce NaN.
     const s = summarize(f, f.days[0]!.date, f.days.at(-1)!.date, 2422);
     expect(Number.isFinite(s.totalSnowCm)).toBe(true);
+  });
+});
+
+describe('utcOffsetHoursOf', () => {
+  const f = parseForecast(sample, 'ecmwf_ifs025', ASPEN);
+
+  it("uses the offset Open-Meteo recorded, so WeatherNext's UTC steps land on the resort's days", () => {
+    expect(utcOffsetHoursOf([f, { ...f, utcOffsetSeconds: 32400 }], 140.69)).toBe(9);
+    expect(utcOffsetHoursOf([{ ...f, utcOffsetSeconds: -21600 }], -106.95)).toBe(-6);
+  });
+
+  it('falls back to solar time for forecasts cached before the offset was recorded', () => {
+    expect(utcOffsetHoursOf([f], 140.69)).toBe(9); // Niseko
+    expect(utcOffsetHoursOf([f], -106.95)).toBe(-7); // Snowmass
+    expect(utcOffsetHoursOf([], 6.87)).toBe(0); // Chamonix: an hour or two off, briefly
   });
 });

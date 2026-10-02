@@ -33,6 +33,7 @@ export type RawResponse = {
   latitude?: number;
   longitude?: number;
   elevation?: number;
+  utc_offset_seconds?: number;
   daily?: RawSeries;
   hourly?: RawSeries;
 };
@@ -131,6 +132,9 @@ export function parseForecast(
     modelElevationM: typeof json.elevation === 'number' ? json.elevation : null,
     days,
     missingVariables: [...new Set(missingVariables)],
+    ...(typeof json.utc_offset_seconds === 'number'
+      ? { utcOffsetSeconds: json.utc_offset_seconds }
+      : {}),
   };
 }
 

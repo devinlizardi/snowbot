@@ -1,3 +1,5 @@
+import { WET_DAY_MM } from './snowfall.js';
+
 /** Shared vocabulary for every weather source. Units are named in the field so
  *  nothing depends on remembering what Open-Meteo or BigQuery hands back:
  *  snowfall in cm, depths and heights in metres, temps in °C, wind in km/h. */
@@ -37,6 +39,9 @@ export type ModelForecast = {
   /** Variables this model did not provide, so a post never implies it knows
    *  something it doesn't. */
   missingVariables: string[];
+  /** The resort's UTC offset when the forecast was fetched, from Open-Meteo's
+   *  `timezone=auto`. Absent on values cached before it was recorded. */
+  utcOffsetSeconds?: number;
 };
 
 export type ObservedSnow = {
@@ -62,8 +67,8 @@ export type ForecastSummary = {
   coldestC: number | null;
   warmestC: number | null;
   maxGustKmh: number | null;
-  /** True when any day in the window has a midday freezing level above the
-   *  base — i.e. a rain risk at the bottom of the mountain. */
+  /** True when a day in the window has precipitation and a midday freezing
+   *  level above the base — i.e. a rain risk at the bottom of the mountain. */
   rainRiskAtBase: boolean;
 };
 
@@ -103,8 +108,25 @@ export function summarize(
     maxGustKmh: gusts.length ? Math.round(Math.max(...gusts)) : null,
     rainRiskAtBase:
       baseElevationM !== undefined &&
-      days.some((d) => d.freezingLevelM !== null && d.freezingLevelM > baseElevationM),
+      days.some(
+        (d) =>
+          d.freezingLevelM !== null &&
+          d.freezingLevelM > baseElevationM &&
+          (d.precipitationMm ?? 0) >= WET_DAY_MM,
+      ),
   };
+}
+
+/**
+ * Hours to add to a UTC time to get the resort's local time. Taken from the
+ * first forecast that recorded it (Open-Meteo answers in resort-local dates, so
+ * this is what lines WeatherNext's UTC steps up with them). A forecast cached
+ * before the offset was recorded falls back to solar time, which is within an
+ * hour or two everywhere on the board and expires with the cache.
+ */
+export function utcOffsetHoursOf(forecasts: readonly ModelForecast[], lon: number): number {
+  const known = forecasts.find((f) => typeof f.utcOffsetSeconds === 'number');
+  return known ? (known.utcOffsetSeconds as number) / 3600 : Math.round(lon / 15);
 }
 
 function round1(n: number): number {

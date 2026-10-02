@@ -58,6 +58,7 @@ The jobs:
 | `flightWatch`     | flight status for all five, one combined message at T-24h and T-3h            |
 | `expeditionBuild` | rank the destination board, build one expedition, post the dossier + thread   |
 | `expeditionWatch` | daily re-pricing of `/watch`ed expeditions into their thread                   |
+| `snapshot`        | print what `/snapshot` would reply; never posts, never scheduled              |
 
 ## Serve mode
 
@@ -82,6 +83,7 @@ Each tick runs a job exactly the way the CLI does, so anything that works with
 | `expeditionBuild` | Mondays 08:00 | `0 8 * * 1`  |
 | `expeditionWatch` | daily 09:00   | `0 9 * * *`  |
 | `noop`            | never         | —            |
+| `snapshot`        | never         | — (`/snapshot` on demand) |
 
 `SNOWBOT_DRY_RUN=1` turns every scheduled tick into a dry run; `SNOWBOT_CHANNEL`
 picks the channel exactly as `--channel` does. Slash commands are registered
@@ -113,10 +115,12 @@ src/
   logger.ts          JSON lines in production, readable in a terminal
   discord/client.ts  the only thing allowed to talk to Discord; enforces the post budget
   discord/anchor.ts  the self-editing pinned Aspen status message
-  discord/commands.ts  /join /airports /flight /trip /build /watch /quiet
+  discord/commands.ts  /join /airports /flight /trip /snapshot /build /watch /quiet
   llm/client.ts      Anthropic calls with per-job usage and cost logging
   sources/_cache.ts  fetch-through cache; serves stale data rather than failing a job
   sources/weather/   ECMWF + WeatherNext + archive + seasonal → one SnowReport
+                     (+ conditions.ts: temperature, wind, rain, freezing level)
+  snapshot.ts        /snapshot: every spot, next 7 days, where the models agree
   sources/           flights, lodging, fx, flight status, LLM web lookups
   jobs/_runner.ts    CLI parsing, job context, run ledger
   jobs/              one file per job

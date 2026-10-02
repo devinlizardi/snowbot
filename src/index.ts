@@ -5,6 +5,7 @@ import { expeditionBuildJob } from './jobs/expeditionBuild.js';
 import { expeditionWatchJob } from './jobs/expeditionWatch.js';
 import { flightWatchJob } from './jobs/flightWatch.js';
 import { noopJob } from './jobs/noop.js';
+import { snapshotJob } from './jobs/snapshot.js';
 import { log } from './logger.js';
 import { handleSignals, startServe } from './serve.js';
 
@@ -15,6 +16,7 @@ export const JOBS: Record<string, Job> = {
   [flightWatchJob.name]: flightWatchJob,
   [expeditionBuildJob.name]: expeditionBuildJob,
   [expeditionWatchJob.name]: expeditionWatchJob,
+  [snapshotJob.name]: snapshotJob,
 };
 
 async function main() {

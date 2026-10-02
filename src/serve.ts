@@ -7,6 +7,7 @@ import type { Job } from './jobs/_runner.js';
 import { runJob } from './jobs/_runner.js';
 import { buildReply, KV_LAST_BUILD, type LastBuild } from './jobs/expeditionBuild.js';
 import { log } from './logger.js';
+import { runSnapshot } from './snapshot.js';
 import { startScheduler, type Scheduler } from './scheduler.js';
 
 /*
@@ -84,9 +85,19 @@ export async function startServe(
     attachInteractionHandler(client, {
       db,
       cfg,
-      onAction: async (action: CommandAction) => {
+      onAction: async (action: CommandAction, ctx) => {
         if (action.kind === 'trip') {
           return tripText(db) ?? 'No Aspen status yet — the first briefing has not run.';
+        }
+        if (action.kind === 'snapshot') {
+          // Called directly rather than through runJob, which would open a
+          // second Poster and gateway login for every request. The reply is
+          // already deferred, so a cold run has Discord's 15 minutes.
+          const result = await runSnapshot(
+            { cfg, db, log: log.child({ command: 'snapshot', user: ctx.user.name }), now: ctx.now },
+            { offline: false },
+          );
+          return result.text;
         }
         const job = jobs.expeditionBuild;
         if (!job) return 'The expedition builder is not wired in this build yet.';

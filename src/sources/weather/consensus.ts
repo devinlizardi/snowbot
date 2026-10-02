@@ -1,4 +1,4 @@
-import { deriveSnowfall, type DerivedSnowDay } from './snowfall.js';
+import { deriveSnowfall, WET_DAY_MM, type DerivedSnowDay } from './snowfall.js';
 import type { ModelForecast } from './types.js';
 import type { WeatherNextForecast } from './weathernext.js';
 
@@ -78,8 +78,9 @@ export type SnowReport = {
   /** One sentence a person could read aloud in the channel. */
   explanation: string;
   tempRange: { minC: number; maxC: number } | null;
-  /** Any model's midday freezing level above the base, or a WeatherNext day
-   *  warm enough that its precipitation falls as rain. */
+  /** A day with at least WET_DAY_MM of precipitation and either a model's
+   *  midday freezing level above the base, or WeatherNext warm enough that it
+   *  falls as rain. A warm dry day is not a rain risk. */
   rainRiskAtBase: boolean;
   maxGustKmh: number | null;
   /** What we can honestly say about the summit given what was supplied. */
@@ -144,9 +145,16 @@ export function buildSnowReport(input: BuildSnowReportInput): SnowReport {
   const lows = nums(inWindow.map((d) => d.tempMinC));
   const highs = nums(inWindow.map((d) => d.tempMaxC));
   const gusts = nums(inWindow.map((d) => d.gustMaxKmh ?? d.windMaxKmh));
+  // Rain needs something to fall: a freezing level above the base on a dry
+  // day is a warm afternoon, and in October that is nearly every day.
   const rainRiskAtBase =
-    inWindow.some((d) => d.freezingLevelM !== null && d.freezingLevelM > baseElevationM) ||
-    (derived?.days.some((d) => d.fallsAsRain) ?? false);
+    inWindow.some(
+      (d) =>
+        d.freezingLevelM !== null &&
+        d.freezingLevelM > baseElevationM &&
+        (d.precipitationMm ?? 0) >= WET_DAY_MM,
+    ) ||
+    (derived?.days.some((d) => d.fallsAsRain && d.precipMm >= WET_DAY_MM) ?? false);
 
   const report: SnowReport = {
     window,
@@ -377,10 +385,16 @@ const DISPLAY_NAMES: Record<string, string> = {
   icon_global: 'ICON',
   gfs_seamless: 'GFS',
   ncep_nam_conus: 'NAM',
+  weathernext_3: 'WeatherNext',
 };
 
+/** What a person calls the model: `ecmwf_ifs025` → `ECMWF`. */
+export function modelName(model: string): string {
+  return DISPLAY_NAMES[model] ?? model;
+}
+
 function quote(m: QuotedTotal): string {
-  return `${DISPLAY_NAMES[m.model] ?? m.model} ${Math.round(m.totalCm)}cm`;
+  return `${modelName(m.model)} ${Math.round(m.totalCm)}cm`;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

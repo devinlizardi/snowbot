@@ -18,6 +18,10 @@ import type { Percentiles, WeatherNextForecast } from './weathernext.js';
 /** Warmer than this and it is falling as rain, whatever the precip total. */
 export const RAIN_THRESHOLD_C = 2;
 
+/** mm in a day. Below this nothing is falling worth mentioning, so a warm day
+ *  under it is a warm day, not a rain risk. */
+export const WET_DAY_MM = 1;
+
 export function snowLiquidRatio(tempC: number): number {
   if (tempC >= RAIN_THRESHOLD_C) return 0;
   if (tempC >= 0) return 8; // sleety, heavy, barely accumulates
@@ -44,7 +48,10 @@ export type DerivedSnowDay = {
   snowCmP10: number;
   snowCmP90: number;
   meanTempC: number | null;
-  /** True when the day's temperature puts it above the rain threshold. */
+  /** Liquid precipitation for the day, ensemble mean, mm. */
+  precipMm: number;
+  /** True when the day's temperature puts it above the rain threshold —
+   *  whether or not anything falls; check `precipMm` before calling it rain. */
   fallsAsRain: boolean;
   /** Always true here. Never drop this when formatting a post. */
   derived: true;
@@ -87,6 +94,7 @@ export function deriveSnowfall(
         snowCmP10: liquidToSnowCm(sum('p10'), t),
         snowCmP90: liquidToSnowCm(sum('p90'), t),
         meanTempC: meanTempC === null ? null : Math.round(meanTempC * 10) / 10,
+        precipMm: Math.round(sum('mean') * 10) / 10,
         fallsAsRain: meanTempC !== null && meanTempC >= RAIN_THRESHOLD_C,
         derived: true as const,
       };

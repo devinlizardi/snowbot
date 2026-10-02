@@ -27,7 +27,7 @@ import { fetchClimatology, type Climatology } from './sources/weather/climatolog
 import { buildSnowReport, type Confidence, type SnowReport } from './sources/weather/consensus.js';
 import { crosscheckFor } from './sources/weather/crosscheck.js';
 import { ecmwfAifs, ecmwfIfs } from './sources/weather/ecmwf.js';
-import type { ModelForecast } from './sources/weather/types.js';
+import { utcOffsetHoursOf, type ModelForecast } from './sources/weather/types.js';
 import { weathernextSource, type WeatherNextForecast } from './sources/weather/weathernext.js';
 
 /**
@@ -819,6 +819,9 @@ export async function gatherExpeditionInputs(
     window: { start: chosen.start, end: chosen.end < horizon ? chosen.end : horizon },
     base: models,
     ...(weathernext ? { weathernext } : {}),
+    // WeatherNext steps are UTC; without this its days were UTC days, nine
+    // hours off for Hokkaido.
+    utcOffsetHours: utcOffsetHoursOf(models, dest.lon),
     baseElevationM: dest.base_elevation_m,
     summitElevationM: dest.summit_elevation_m,
   });

@@ -322,6 +322,18 @@ describe('conditions', () => {
     expect(wet.explanation).toMatch(/with a rain risk at the base\.$/);
   });
 
+  it('does not call a warm dry week a rain risk', () => {
+    // October: the freezing level sits above the base every afternoon, nothing falls.
+    const dry = build({ base: [model('ecmwf_ifs025', [0, 0, 0], { freezingLevelM: 3900 })] });
+    expect(dry.rainRiskAtBase).toBe(false);
+    expect(formatSnowLine(dry)).not.toMatch(/rain/);
+    const warmWn = build({
+      base: [model('ecmwf_ifs025', [0, 0, 0])],
+      weathernext: weathernext([0, 0.2, 0], 0.2, 8),
+    });
+    expect(warmWn.rainRiskAtBase).toBe(false);
+  });
+
   it('also flags rain risk when WeatherNext says the day is too warm to snow', () => {
     const report = build({
       base: [model('ecmwf_ifs025', [20, 12, 10])],
