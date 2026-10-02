@@ -10,7 +10,7 @@ timezone: America/New_York
 currency_display: USD # everything is normalized to USD before it is shown
 
 discord:
-  # Real channel lives on Elliot's guild. The bot is deliberately NOT invited
+  # Real channel lives on a friend's guild. The bot is deliberately NOT invited
   # there yet — see PHASE-0.md §3a. Everything through Phase 3 runs against test.
   guild_id_env: DISCORD_GUILD_ID
   channel_id_env: DISCORD_CHANNEL_ID
@@ -23,27 +23,27 @@ discord:
     pin: true
 
 roster:
-  # Public by design — Devin confirmed names + airports in the public repo are fine.
+  # Roster labels are placeholders (M1-M5), not real names.
   # Airports are in preference order. `price_all: true` means every listed airport
   # is priced on every search, not just the first.
-  - name: Devin
-    discord_id_env: DISCORD_USER_DEVIN
+  - name: M1
+    discord_id_env: DISCORD_USER_M1
     airports: [JFK, LGA, EWR]
     price_all: false
-  - name: Andre
-    discord_id_env: DISCORD_USER_ANDRE
+  - name: M2
+    discord_id_env: DISCORD_USER_M2
     airports: [EWR, JFK, LGA]
     price_all: false
-  - name: Elliot
-    discord_id_env: DISCORD_USER_ELLIOT
+  - name: M3
+    discord_id_env: DISCORD_USER_M3
     airports: [BUR, LAX]
     price_all: true # both priced every time, delta stated out loud
-  - name: Jeremy
-    discord_id_env: DISCORD_USER_JEREMY
+  - name: M4
+    discord_id_env: DISCORD_USER_M4
     airports: [SNA, LAX]
     price_all: true
-  - name: Hagen
-    discord_id_env: DISCORD_USER_HAGEN
+  - name: M5
+    discord_id_env: DISCORD_USER_M5
     airports: [SFO, OAK, SJC]
     price_all: false
 

@@ -73,7 +73,7 @@ HOW TO SELL IT
 - Lead with the single most compelling true thing about this trip: the snow history, the terrain, the price, the timing. Make them picture it: first chair on a storm morning, the onsen after, dinner in town.
 - destination.pitch (hook, terrain, off_snow, heads_up) is hand-written by the group for exactly this. Lean on it and rephrase it; don't add resort facts of your own beyond it.
 - Lodging highlights (hot tub, onsen, ski-in/ski-out, kitchen…) are selling points. Use them.
-- Be specific. "New snow on 6 of these 10 days in a typical year" beats "great snow". Talk to people by name when it helps ("Elliot, drive to LAX for this one").
+- Be specific. "New snow on 6 of these 10 days in a typical year" beats "great snow". Talk to people by name when it helps ("M3, drive to LAX for this one").
 - No clichés: nothing "nestled", no "winter wonderland", "unforgettable", "epic adventure", "look no further", "hidden gem". One exclamation point at most.
 - Honesty is what makes the pitch land. A friend who oversells gets ignored. Put the real downside in "catch", plainly.
 

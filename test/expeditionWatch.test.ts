@@ -23,11 +23,11 @@ const WINDOW = ['2027-02-12', '2027-02-20'] as const;
 
 /** The dossier's per-member quotes; also the day-0 baseline of the fare series. */
 const PER_MEMBER = [
-  { member: 'Devin', origin: 'JFK', priceUsd: 698 },
-  { member: 'Andre', origin: 'EWR', priceUsd: 698 },
-  { member: 'Elliot', origin: 'LAX', priceUsd: 511 },
-  { member: 'Jeremy', origin: 'LAX', priceUsd: 524 },
-  { member: 'Hagen', origin: 'SFO', priceUsd: 540 },
+  { member: 'M1', origin: 'JFK', priceUsd: 698 },
+  { member: 'M2', origin: 'EWR', priceUsd: 698 },
+  { member: 'M3', origin: 'LAX', priceUsd: 511 },
+  { member: 'M4', origin: 'LAX', priceUsd: 524 },
+  { member: 'M5', origin: 'SFO', priceUsd: 540 },
 ];
 
 /** Only the routing slice; Packet 12 owns the rest of the plan and we must not care. */
@@ -37,7 +37,7 @@ const PLAN = {
     recommended: 'consolidate-west',
     independent: {
       perMember: PER_MEMBER.map((m) =>
-        m.member === 'Elliot' ? { ...m, origin: 'BUR', priceUsd: 684 } : m,
+        m.member === 'M3' ? { ...m, origin: 'BUR', priceUsd: 684 } : m,
       ),
     },
     'consolidate-west': { perMember: PER_MEMBER },
@@ -74,8 +74,8 @@ describe('itinerariesFor', () => {
   it('follows the recommended routing and looks the airport up on the board', () => {
     const its = itinerariesFor(row(), cfg);
     expect(its).toHaveLength(5);
-    expect(its.find((i) => i.member === 'Elliot')).toEqual({
-      member: 'Elliot',
+    expect(its.find((i) => i.member === 'M3')).toEqual({
+      member: 'M3',
       origin: 'LAX',
       dest: 'CTS',
       depart: WINDOW[0],
@@ -87,7 +87,7 @@ describe('itinerariesFor', () => {
   it('falls back to independent routing when the recommendation is missing or unknown', () => {
     const plan = { routing: { recommended: 'teleport', independent: PLAN.routing.independent } };
     const its = itinerariesFor(row({ plan_json: JSON.stringify(plan) }), cfg);
-    expect(its.find((i) => i.member === 'Elliot')?.origin).toBe('BUR');
+    expect(its.find((i) => i.member === 'M3')?.origin).toBe('BUR');
   });
 
   it('dedupes member+origin and drops rows it cannot read', () => {
@@ -95,25 +95,25 @@ describe('itinerariesFor', () => {
       routing: {
         independent: {
           perMember: [
-            { member: 'Devin', origin: 'jfk', priceUsd: 700 },
-            { member: 'Devin', origin: 'JFK', priceUsd: 710 },
+            { member: 'M1', origin: 'jfk', priceUsd: 700 },
+            { member: 'M1', origin: 'JFK', priceUsd: 710 },
             { member: 'Nobody' },
             { origin: 'SFO' },
             'garbage',
-            { member: 'Hagen', origin: 'SFO', priceUsd: 'n/a' },
+            { member: 'M5', origin: 'SFO', priceUsd: 'n/a' },
           ],
         },
       },
     };
     const its = itinerariesFor(row({ plan_json: JSON.stringify(plan) }), cfg);
     expect(its.map((i) => [i.member, i.origin, i.priceUsd])).toEqual([
-      ['Devin', 'JFK', 700],
-      ['Hagen', 'SFO', null],
+      ['M1', 'JFK', 700],
+      ['M5', 'SFO', null],
     ]);
   });
 
   it('prefers an explicit dest on the plan over the board, and yields nothing off-board', () => {
-    const plan = { routing: { independent: { perMember: [{ member: 'Devin', origin: 'JFK', dest: 'hnd' }] } } };
+    const plan = { routing: { independent: { perMember: [{ member: 'M1', origin: 'JFK', dest: 'hnd' }] } } };
     expect(itinerariesFor(row({ plan_json: JSON.stringify(plan), destination: 'atlantis' }), cfg)[0]?.dest).toBe('HND');
     expect(itinerariesFor(row({ destination: 'atlantis' }), cfg)).toEqual([]);
   });
@@ -157,18 +157,18 @@ describe('classifyMove', () => {
 describe('renderWatchTable', () => {
   it('lines everyone up with a delta and a floor', () => {
     const out = renderWatchTable([
-      { member: 'Devin', origin: 'JFK', today: 698, last: 650, floor: 640 },
-      { member: 'Hagen', origin: 'SFO', today: 540, last: 540, floor: 540 },
-      { member: 'Elliot', origin: 'LAX', today: 480, last: 511, floor: null },
-      { member: 'Jeremy', origin: 'LAX', today: null, last: 524, floor: 524 },
+      { member: 'M1', origin: 'JFK', today: 698, last: 650, floor: 640 },
+      { member: 'M5', origin: 'SFO', today: 540, last: 540, floor: 540 },
+      { member: 'M3', origin: 'LAX', today: 480, last: 511, floor: null },
+      { member: 'M4', origin: 'LAX', today: null, last: 524, floor: 524 },
     ]);
     const lines = out.split('\n');
     expect(lines[0]).toBe('```');
     expect(lines[1]).toMatch(/^member\s+origin\s+today\s+Δ vs last\s+floor$/);
-    expect(lines[2]).toMatch(/^Devin\s+JFK\s+\$698\s+\+\$48 \(\+7%\)\s+\$640$/);
-    expect(lines[3]).toMatch(/^Hagen\s+SFO\s+\$540\s+\$0\s+\$540$/);
-    expect(lines[4]).toMatch(/^Elliot\s+LAX\s+\$480\s+-\$31 \(-6%\)\s+—$/);
-    expect(lines[5]).toMatch(/^Jeremy\s+LAX\s+—\s+—\s+\$524$/);
+    expect(lines[2]).toMatch(/^M1\s+JFK\s+\$698\s+\+\$48 \(\+7%\)\s+\$640$/);
+    expect(lines[3]).toMatch(/^M5\s+SFO\s+\$540\s+\$0\s+\$540$/);
+    expect(lines[4]).toMatch(/^M3\s+LAX\s+\$480\s+-\$31 \(-6%\)\s+—$/);
+    expect(lines[5]).toMatch(/^M4\s+LAX\s+—\s+—\s+\$524$/);
     expect(lines[6]).toBe('```');
   });
 });

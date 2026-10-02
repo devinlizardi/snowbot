@@ -61,7 +61,7 @@ const route = (
 describe('roster helpers', () => {
   it('maps every California airport to its hub and leaves the East Coast alone', () => {
     const by = Object.fromEntries(members.map((m) => [m.name, hubFor(m)]));
-    expect(by).toEqual({ Devin: null, Andre: null, Elliot: 'LAX', Jeremy: 'LAX', Hagen: 'SFO' });
+    expect(by).toEqual({ M1: null, M2: null, M3: 'LAX', M4: 'LAX', M5: 'SFO' });
   });
 
   it('prices each member’s airports plus the hubs', () => {
@@ -91,19 +91,19 @@ describe('solveRouting', () => {
         // consolidation still wins because it puts them on one itinerary.
         expect(r.consolidateWest.groupTotalUsd).toBe(698 + 698 + 551 + 551 + 540);
         expect(r.independent.groupTotalUsd).toBe(698 + 698 + 551 + 551 + 540);
-        expect(route(r, 'consolidateWest', 'Elliot')).toMatchObject({
+        expect(route(r, 'consolidateWest', 'M3')).toMatchObject({
           origin: 'LAX',
           priceUsd: 511,
           positioningUsd: 40,
           allInUsd: 551,
           delta: { vs: 'BUR', usd: 173 },
         });
-        expect(route(r, 'consolidateWest', 'Elliot').note).toMatch(/estimate: gas or rideshare/);
-        expect(route(r, 'consolidateWest', 'Hagen')).toMatchObject({
+        expect(route(r, 'consolidateWest', 'M3').note).toMatch(/estimate: gas or rideshare/);
+        expect(route(r, 'consolidateWest', 'M5')).toMatchObject({
           origin: 'SFO',
           positioningUsd: 0,
         });
-        expect(r.reason).toMatch(/Elliot, Jeremy/);
+        expect(r.reason).toMatch(/M3, M4/);
       },
     },
     {
@@ -112,15 +112,15 @@ describe('solveRouting', () => {
       recommended: 'independent',
       check: (r) => {
         // LAX is $19 cheaper on paper but $21 dearer once the drive is counted.
-        expect(route(r, 'independent', 'Elliot')).toMatchObject({
+        expect(route(r, 'independent', 'M3')).toMatchObject({
           origin: 'BUR',
           allInUsd: 530,
           delta: { vs: 'LAX', usd: -19 },
         });
-        expect(route(r, 'consolidateWest', 'Elliot').delta).toEqual({ vs: 'BUR', usd: 19 });
+        expect(route(r, 'consolidateWest', 'M3').delta).toEqual({ vs: 'BUR', usd: 19 });
         expect(r.consolidateWest.groupTotalUsd).toBeGreaterThan(r.independent.groupTotalUsd);
         expect(r.deltaLines).toContain(
-          'Elliot: BUR $530 / LAX $511 — LAX is only $19 cheaper, figure ~$40 to get to LAX — fly from BUR',
+          'M3: BUR $530 / LAX $511 — LAX is only $19 cheaper, figure ~$40 to get to LAX — fly from BUR',
         );
       },
     },
@@ -148,12 +148,12 @@ describe('solveRouting', () => {
       quotes: quotes({ JFK: 698, EWR: 698, BUR: null, SNA: 700, LAX: 640, SFO: 540 }),
       recommended: 'independent',
       check: (r) => {
-        const elliot = route(r, 'independent', 'Elliot');
-        expect(elliot.origin).toBe('LAX');
-        expect(elliot.unpriced).toBe(false);
-        expect(elliot.note).toMatch(/no fare from BUR/);
+        const m3 = route(r, 'independent', 'M3');
+        expect(m3.origin).toBe('LAX');
+        expect(m3.unpriced).toBe(false);
+        expect(m3.note).toMatch(/no fare from BUR/);
         expect(r.independent.unpriced).toEqual([]);
-        expect(r.deltaLines).toContain('Elliot: BUR n/a / LAX $640 — no BUR fare, fly from LAX');
+        expect(r.deltaLines).toContain('M3: BUR n/a / LAX $640 — no BUR fare, fly from LAX');
       },
     },
     {
@@ -162,11 +162,11 @@ describe('solveRouting', () => {
       recommended: 'consolidate-west',
       check: (r) => {
         for (const s of ['independent', 'consolidateWest'] as const) {
-          const hagen = route(r, s, 'Hagen');
-          expect(hagen.unpriced).toBe(true);
-          expect(hagen.origin).toBe('SFO');
-          expect(hagen.allInUsd).toBeNull();
-          expect(r[s].unpriced).toEqual(['Hagen']);
+          const m5 = route(r, s, 'M5');
+          expect(m5.unpriced).toBe(true);
+          expect(m5.origin).toBe('SFO');
+          expect(m5.allInUsd).toBeNull();
+          expect(r[s].unpriced).toEqual(['M5']);
         }
         // Group total excludes the unpriced member rather than pretending.
         expect(r.independent.groupTotalUsd).toBe(698 + 698 + 551 + 551);
@@ -178,11 +178,11 @@ describe('solveRouting', () => {
       quotes: quotes({ JFK: 698, EWR: 698, BUR: 684, SNA: 698, LAX: null, SFO: 540 }),
       recommended: 'independent',
       check: (r) => {
-        expect(route(r, 'consolidateWest', 'Elliot')).toMatchObject({
+        expect(route(r, 'consolidateWest', 'M3')).toMatchObject({
           origin: 'BUR',
           priceUsd: 684,
         });
-        expect(route(r, 'consolidateWest', 'Elliot').note).toMatch(/no LAX fare/);
+        expect(route(r, 'consolidateWest', 'M3').note).toMatch(/no LAX fare/);
       },
     },
   ];
@@ -204,8 +204,8 @@ describe('solveRouting', () => {
       OPTS,
     );
     expect(win.deltaLines).toEqual([
-      'Elliot: BUR $684 / LAX $511 — worth the drive ($173 cheaper, figure ~$40 to get to LAX)',
-      'Jeremy: SNA $698 / LAX $511 — worth the drive ($187 cheaper, figure ~$40 to get to LAX)',
+      'M3: BUR $684 / LAX $511 — worth the drive ($173 cheaper, figure ~$40 to get to LAX)',
+      'M4: SNA $698 / LAX $511 — worth the drive ($187 cheaper, figure ~$40 to get to LAX)',
     ]);
     const tie = solveRouting(
       members,
@@ -213,14 +213,14 @@ describe('solveRouting', () => {
       quotes({ JFK: 698, EWR: 698, BUR: 500, SNA: 500, LAX: 500, SFO: 540 }),
       OPTS,
     );
-    expect(tie.deltaLines[0]).toBe('Elliot: BUR $500 / LAX $500 — same price, fly from BUR');
+    expect(tie.deltaLines[0]).toBe('M3: BUR $500 / LAX $500 — same price, fly from BUR');
     const lose = solveRouting(
       members,
       niseko,
       quotes({ JFK: 698, EWR: 698, BUR: 480, SNA: 500, LAX: 500, SFO: 540 }),
       OPTS,
     );
-    expect(lose.deltaLines[0]).toBe('Elliot: BUR $480 / LAX $500 — fly from BUR (LAX is $20 more)');
+    expect(lose.deltaLines[0]).toBe('M3: BUR $480 / LAX $500 — fly from BUR (LAX is $20 more)');
   });
 
   it('honours a custom threshold and positioning table', () => {
@@ -233,6 +233,6 @@ describe('solveRouting', () => {
       positioningUsd: { 'BUR->LAX': 0, 'SNA->LAX': 0 },
     });
     expect(free.recommended).toBe('consolidate-west');
-    expect(route(free, 'consolidateWest', 'Elliot').delta).toEqual({ vs: 'BUR', usd: 89 });
+    expect(route(free, 'consolidateWest', 'M3').delta).toEqual({ vs: 'BUR', usd: 89 });
   });
 });

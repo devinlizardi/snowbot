@@ -6,8 +6,8 @@ import type { FxTable } from '../src/sources/fx.js';
 import type { LodgingOption, LodgingSearch } from '../src/sources/lodging.js';
 
 const cfg = loadConfig({ env: {} });
-const elliot: Member = cfg.members.find((m) => m.name === 'Elliot')!;
-const devin: Member = cfg.members.find((m) => m.name === 'Devin')!;
+const m3: Member = cfg.members.find((m) => m.name === 'M3')!;
+const m1: Member = cfg.members.find((m) => m.name === 'M1')!;
 const niseko: Destination = cfg.board.find((d) => d.id === 'niseko')!;
 
 const WINDOW = { depart: '2027-02-06', return: '2027-02-16' }; // 10 nights
@@ -66,9 +66,9 @@ const lodgingSearch: LodgingSearch = {
 };
 
 describe('estimateCost', () => {
-  it('prices Elliot from both airports, picks the cheaper and states the delta', () => {
+  it('prices M3 from both airports, picks the cheaper and states the delta', () => {
     const out = estimateCost(
-      elliot,
+      m3,
       niseko,
       WINDOW,
       {
@@ -77,7 +77,7 @@ describe('estimateCost', () => {
       },
       { groundUsdPp: 60 },
     );
-    expect(out.member).toBe('Elliot');
+    expect(out.member).toBe('M3');
     expect(out.originsPriced).toEqual([
       { origin: 'BUR', priceUsd: 684 },
       { origin: 'LAX', priceUsd: 511 },
@@ -88,23 +88,23 @@ describe('estimateCost', () => {
     expect(out.groundUsd).toBe(60);
     expect(out.totalUsd).toBe(511 + 824 + 60);
     expect(out.notes).toContain(
-      'Elliot: BUR $684 / LAX $511 — LAX is $173 cheaper than BUR, worth the drive',
+      'M3: BUR $684 / LAX $511 — LAX is $173 cheaper than BUR, worth the drive',
     );
   });
 
   it('stays at the home airport when it wins and says by how much', () => {
-    const out = estimateCost(elliot, niseko, WINDOW, {
+    const out = estimateCost(m3, niseko, WINDOW, {
       flightsByOrigin: { BUR: search('BUR', [500]), LAX: search('LAX', [540]) },
       lodging: lodgingSearch,
     });
     expect(out.chosenOrigin).toBe('BUR');
-    expect(out.notes).toContain('Elliot: BUR $500 / LAX $540 — BUR wins by $40');
+    expect(out.notes).toContain('M3: BUR $500 / LAX $540 — BUR wins by $40');
     expect(out.notes).toContain('ground: not estimated');
     expect(out.groundUsd).toBe(0);
   });
 
   it('falls back to the lodging band midpoint when there is no lodging search', () => {
-    const out = estimateCost(devin, niseko, WINDOW, {
+    const out = estimateCost(m1, niseko, WINDOW, {
       flightsByOrigin: { JFK: search('JFK', [1240.6]) },
       lodging: null,
     });
@@ -116,11 +116,11 @@ describe('estimateCost', () => {
     expect(Number.isInteger(out.totalUsd)).toBe(true);
     expect(out.notes.some((n) => n.includes('band midpoint'))).toBe(true);
     // A single priced airport gets no delta line.
-    expect(out.notes.some((n) => n.startsWith('Devin:'))).toBe(false);
+    expect(out.notes.some((n) => n.startsWith('M1:'))).toBe(false);
   });
 
   it('flags a missing origin and still prices the other', () => {
-    const out = estimateCost(elliot, niseko, WINDOW, {
+    const out = estimateCost(m3, niseko, WINDOW, {
       flightsByOrigin: { LAX: search('LAX', [600]) },
       lodging: lodgingSearch,
     });
@@ -134,7 +134,7 @@ describe('estimateCost', () => {
   });
 
   it('excludes airfare from the total, loudly, when nothing was priced', () => {
-    const out = estimateCost(devin, niseko, WINDOW, {
+    const out = estimateCost(m1, niseko, WINDOW, {
       flightsByOrigin: { JFK: search('JFK', []) },
       lodging: lodgingSearch,
     });
@@ -146,7 +146,7 @@ describe('estimateCost', () => {
 
   it('records the fx table date when one is supplied', () => {
     const fx: FxTable = { base: 'USD', date: '2026-09-11', rates: { JPY: 147.32 } };
-    const out = estimateCost(devin, niseko, WINDOW, {
+    const out = estimateCost(m1, niseko, WINDOW, {
       flightsByOrigin: { JFK: search('JFK', [1000]) },
       lodging: lodgingSearch,
       fx,

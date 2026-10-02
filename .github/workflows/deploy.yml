@@ -28,7 +28,7 @@ jobs:
           # (`ssh-keygen -t ed25519 -C snowbot-deploy -f snowbot-deploy`), with
           # only the public half in /home/deploy/.ssh/authorized_keys. Do NOT
           # reuse the personal `snowbot` key: it would hand GitHub a credential
-          # that also opens Devin's other boxes, and rotating it later would
+          # that also opens the maintainer's other boxes, and rotating it later would
           # mean rotating his own login.
           key: ${{ secrets.DROPLET_SSH_KEY }}
           # `script_stop` was dropped in ssh-action@v1 (it warns and ignores it),

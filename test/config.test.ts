@@ -30,7 +30,7 @@ describe('loadConfig', () => {
         DISCORD_CHANNEL_ID: 'rc',
         GCP_PROJECT_ID: 'proj',
         GCP_DATASET_ID: 'weathernext_3',
-        DISCORD_USER_DEVIN: '123',
+        DISCORD_USER_M1: '123',
       },
     });
     expect(cfg.members).toHaveLength(5);
@@ -41,16 +41,16 @@ describe('loadConfig', () => {
       datasetId: 'weathernext_3',
       table: 'weathernext_3_0_0_0p1deg',
     });
-    expect(cfg.members.find((m) => m.name === 'Devin')?.discordId).toBe('123');
+    expect(cfg.members.find((m) => m.name === 'M1')?.discordId).toBe('123');
   });
 
-  it('prices both of Elliot and Jeremy airports and only the first for everyone else', () => {
+  it('prices both of M3 and M4 airports and only the first for everyone else', () => {
     const cfg = loadConfig({ env: {} });
     const by = (n: string) => cfg.members.find((m) => m.name === n)!;
-    expect(by('Elliot').pricedAirports).toEqual(['BUR', 'LAX']);
-    expect(by('Jeremy').pricedAirports).toEqual(['SNA', 'LAX']);
-    expect(by('Devin').pricedAirports).toEqual(['JFK']);
-    expect(by('Hagen').pricedAirports).toEqual(['SFO']);
+    expect(by('M3').pricedAirports).toEqual(['BUR', 'LAX']);
+    expect(by('M4').pricedAirports).toEqual(['SNA', 'LAX']);
+    expect(by('M1').pricedAirports).toEqual(['JFK']);
+    expect(by('M5').pricedAirports).toEqual(['SFO']);
   });
 
   it('models Aspen as two distinct points with the summit above the base', () => {

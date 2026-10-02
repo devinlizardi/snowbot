@@ -437,7 +437,7 @@ describe('dossier prompt + fallback', () => {
     expect(prompt).not.toMatch(/"legs"/);
     expect(prompt).not.toMatch(/"quotes"/);
     expect(prompt).toContain('"headerLine"');
-    expect(prompt).toContain('Elliot: BUR $684 / LAX $511');
+    expect(prompt).toContain('M3: BUR $684 / LAX $511');
     const t = trimForPrompt(e);
     expect(t.watchCommand).toBe('/watch niseko-0206');
     expect(t.destination.pitch.hook).toMatch(/powder/);
@@ -482,11 +482,11 @@ describe('dossier prompt + fallback', () => {
     const rows = table.split('\n').slice(1, -1);
     expect(rows[0]).toMatch(/^WHO\s+FROM\s+FARE\s+AIRLINE\s+ST\s+LANDS$/);
     expect(rows).toHaveLength(1 + cfg.members.length);
-    expect(rows.find((r) => r.startsWith('Devin'))).toMatch(/^Devin\s+JFK\s+\$698\s+ANA\s+1\s+Sun 20:30$/);
+    expect(rows.find((r) => r.startsWith('M1'))).toMatch(/^M1\s+JFK\s+\$698\s+ANA\s+1\s+Sun 20:30$/);
     // The hub marker hangs after the number, so the digits still line up.
     const col = (who: string) => rows.find((r) => r.startsWith(who))!.indexOf('$');
-    expect(col('Elliot')).toBe(col('Devin'));
-    expect(rows.find((r) => r.startsWith('Elliot'))).toContain('$551*');
+    expect(col('M3')).toBe(col('M1'));
+    expect(rows.find((r) => r.startsWith('M3'))).toContain('$551*');
     for (const r of rows) expect(r.length).toBeLessThanOrEqual(42);
     for (const line of e.routing.deltaLines) expect(flights).toContain(line);
     expect(flights).toMatch(/📉 JFK fares across/);

@@ -45,7 +45,7 @@ full design; the section numbers below refer to it. Your packet is described in 
 - **Setup:** run `pnpm install --frozen-lockfile` first (node_modules is not in the
   worktree). Then before finishing: `pnpm typecheck && pnpm test && pnpm lint` — all
   three must be green. Do not weaken tsconfig or eslint.
-- **Never install into Devin's clone from a Linux sandbox.** `esbuild` and
+- **Never install into the maintainer's clone from a Linux sandbox.** `esbuild` and
   `better-sqlite3` ship platform-specific binaries, and pnpm installs only the current
   platform's, so an install run against a mounted `~/Documents/GitHub/snowbot` leaves
   a `node_modules` that his macOS shell cannot use (`You installed esbuild for another

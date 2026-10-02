@@ -18,8 +18,8 @@ const ctxFor = (id: string, name: string, now = NOW): CommandContext => ({
   now,
   user: { id, name },
 });
-const devin = () => ctxFor('u-devin', 'devin');
-const andre = () => ctxFor('u-andre', 'Andre');
+const m1 = () => ctxFor('u-m1', 'm1');
+const m2 = () => ctxFor('u-m2', 'M2');
 const stranger = () => ctxFor('u-999', 'Randy');
 
 const insertExpedition = (id: string, status: 'proposed' | 'watched' | 'retired') =>
@@ -59,14 +59,14 @@ describe('definitions', () => {
 
 describe('/join', () => {
   it('creates a member seeded from config, matching the name case-insensitively', async () => {
-    const r = await handle('join', null, {}, devin());
+    const r = await handle('join', null, {}, m1());
     expect(r.reply).toMatch(/JFK, LGA, EWR/);
     const row = db.prepare('SELECT name, discord_id FROM members').get() as {
       name: string;
       discord_id: string;
     };
-    expect(row).toEqual({ name: 'Devin', discord_id: 'u-devin' });
-    expect(airportsOf('u-devin')).toEqual(['JFK', 'LGA', 'EWR']);
+    expect(row).toEqual({ name: 'M1', discord_id: 'u-m1' });
+    expect(airportsOf('u-m1')).toEqual(['JFK', 'LGA', 'EWR']);
   });
 
   it('gives a stranger an empty airport list', async () => {
@@ -75,54 +75,54 @@ describe('/join', () => {
   });
 
   it('is idempotent and never resets curated airports', async () => {
-    await handle('join', null, {}, devin());
-    await handle('airports', 'remove', { iata: 'LGA' }, devin());
-    const r = await handle('join', null, {}, devin());
+    await handle('join', null, {}, m1());
+    await handle('airports', 'remove', { iata: 'LGA' }, m1());
+    const r = await handle('join', null, {}, m1());
     expect(r.reply).toMatch(/already on the roster/);
-    expect(airportsOf('u-devin')).toEqual(['JFK', 'EWR']);
+    expect(airportsOf('u-m1')).toEqual(['JFK', 'EWR']);
     expect((db.prepare('SELECT COUNT(*) AS n FROM members').get() as { n: number }).n).toBe(1);
   });
 
   it('claims a pre-seeded row that has no discord id', async () => {
-    db.prepare(`INSERT INTO members (name, airports_json) VALUES ('Andre', '["EWR"]')`).run();
-    await handle('join', null, {}, andre());
-    expect(airportsOf('u-andre')).toEqual(['EWR']);
+    db.prepare(`INSERT INTO members (name, airports_json) VALUES ('M2', '["EWR"]')`).run();
+    await handle('join', null, {}, m2());
+    expect(airportsOf('u-m2')).toEqual(['EWR']);
     expect((db.prepare('SELECT COUNT(*) AS n FROM members').get() as { n: number }).n).toBe(1);
   });
 });
 
 describe('/airports', () => {
   beforeEach(async () => {
-    await handle('join', null, {}, devin());
+    await handle('join', null, {}, m1());
   });
 
   it('adds, uppercasing the input', async () => {
-    const r = await handle('airports', 'add', { iata: 'hpn' }, devin());
+    const r = await handle('airports', 'add', { iata: 'hpn' }, m1());
     expect(r.reply).toMatch(/Added HPN/);
-    expect(airportsOf('u-devin')).toEqual(['JFK', 'LGA', 'EWR', 'HPN']);
+    expect(airportsOf('u-m1')).toEqual(['JFK', 'LGA', 'EWR', 'HPN']);
   });
 
   it('removes', async () => {
-    await handle('airports', 'remove', { iata: 'LGA' }, devin());
-    expect(airportsOf('u-devin')).toEqual(['JFK', 'EWR']);
+    await handle('airports', 'remove', { iata: 'LGA' }, m1());
+    expect(airportsOf('u-m1')).toEqual(['JFK', 'EWR']);
   });
 
   it.each(['JFKX', 'jf', '12A', ''])('rejects the invalid code %j', async (bad) => {
-    const r = await handle('airports', 'add', { iata: bad }, devin());
+    const r = await handle('airports', 'add', { iata: bad }, m1());
     expect(r.ephemeral).toBe(true);
     expect(r.reply).toMatch(/3-letter IATA/);
-    expect(airportsOf('u-devin')).toEqual(['JFK', 'LGA', 'EWR']);
+    expect(airportsOf('u-m1')).toEqual(['JFK', 'LGA', 'EWR']);
   });
 
   it('refuses duplicates and missing removals politely', async () => {
-    expect((await handle('airports', 'add', { iata: 'JFK' }, devin())).reply).toMatch(/already/);
-    expect((await handle('airports', 'remove', { iata: 'SFO' }, devin())).reply).toMatch(
+    expect((await handle('airports', 'add', { iata: 'JFK' }, m1())).reply).toMatch(/already/);
+    expect((await handle('airports', 'remove', { iata: 'SFO' }, m1())).reply).toMatch(
       /isn't on your list/,
     );
   });
 
   it('lists', async () => {
-    expect((await handle('airports', 'list', {}, devin())).reply).toMatch(/JFK, LGA, EWR/);
+    expect((await handle('airports', 'list', {}, m1())).reply).toMatch(/JFK, LGA, EWR/);
   });
 
   it('requires a roster entry', async () => {
@@ -135,52 +135,52 @@ describe('/flight', () => {
   const ua = { airline: 'ua', number: '1234', date: '2027-01-24', origin: 'jfk', dest: 'ase' };
 
   it('refuses to add before /join', async () => {
-    const r = await handle('flight', 'add', ua, devin());
+    const r = await handle('flight', 'add', ua, m1());
     expect(r.ephemeral).toBe(true);
     expect(r.reply).toMatch(/\/join/);
     expect((db.prepare('SELECT COUNT(*) AS n FROM flights').get() as { n: number }).n).toBe(0);
   });
 
   it('adds, lists and removes', async () => {
-    await handle('join', null, {}, devin());
-    await handle('join', null, {}, andre());
-    const add = await handle('flight', 'add', ua, devin());
+    await handle('join', null, {}, m1());
+    await handle('join', null, {}, m2());
+    const add = await handle('flight', 'add', ua, m1());
     expect(add.reply).toMatch(/UA1234 JFK→ASE on 2027-01-24/);
     await handle(
       'flight',
       'add',
       { ...ua, airline: 'DL', number: '88', origin: 'EWR', date: '2027-01-23' },
-      andre(),
+      m2(),
     );
 
     const list = await handle('flight', 'list', {}, stranger());
-    expect(list.reply).toContain('Andre');
+    expect(list.reply).toContain('M2');
     expect(list.reply).toContain('DL88');
     expect(list.reply).toContain('UA1234');
     expect(list.reply.indexOf('DL88')).toBeLessThan(list.reply.indexOf('UA1234'));
 
     const id = (db.prepare(`SELECT id FROM flights WHERE airline = 'UA'`).get() as { id: number })
       .id;
-    const rm = await handle('flight', 'remove', { id }, devin());
+    const rm = await handle('flight', 'remove', { id }, m1());
     expect(rm.reply).toMatch(/Removed UA1234/);
     expect((db.prepare('SELECT COUNT(*) AS n FROM flights').get() as { n: number }).n).toBe(1);
   });
 
   it("won't remove someone else's flight", async () => {
-    await handle('join', null, {}, devin());
-    await handle('join', null, {}, andre());
-    await handle('flight', 'add', ua, devin());
+    await handle('join', null, {}, m1());
+    await handle('join', null, {}, m2());
+    await handle('flight', 'add', ua, m1());
     const id = (db.prepare('SELECT id FROM flights').get() as { id: number }).id;
-    const r = await handle('flight', 'remove', { id }, andre());
+    const r = await handle('flight', 'remove', { id }, m2());
     expect(r.reply).toMatch(/isn't yours/);
     expect((db.prepare('SELECT COUNT(*) AS n FROM flights').get() as { n: number }).n).toBe(1);
-    expect((await handle('flight', 'remove', { id: 999 }, andre())).reply).toMatch(/No flight/);
+    expect((await handle('flight', 'remove', { id: 999 }, m2())).reply).toMatch(/No flight/);
   });
 
   it('hides flights that already departed from the list', async () => {
-    await handle('join', null, {}, devin());
-    await handle('flight', 'add', ua, devin());
-    const later = ctxFor('u-devin', 'devin', new Date('2027-02-01T00:00:00Z'));
+    await handle('join', null, {}, m1());
+    await handle('flight', 'add', ua, m1());
+    const later = ctxFor('u-m1', 'm1', new Date('2027-02-01T00:00:00Z'));
     expect((await handle('flight', 'list', {}, later)).reply).toMatch(/No upcoming flights/);
   });
 
@@ -192,16 +192,16 @@ describe('/flight', () => {
     [{ airline: 'UNITED' }, /Airline should be/],
     [{ number: 'abc' }, /digits only/],
   ])('validates %j', async (bad, msg) => {
-    await handle('join', null, {}, devin());
-    const r = await handle('flight', 'add', { ...ua, ...bad }, devin());
+    await handle('join', null, {}, m1());
+    const r = await handle('flight', 'add', { ...ua, ...bad }, m1());
     expect(r.ephemeral).toBe(true);
     expect(r.reply).toMatch(msg);
   });
 
   it('rejects a duplicate flight with a friendly message', async () => {
-    await handle('join', null, {}, devin());
-    await handle('flight', 'add', ua, devin());
-    const r = await handle('flight', 'add', ua, devin());
+    await handle('join', null, {}, m1());
+    await handle('flight', 'add', ua, m1());
+    const r = await handle('flight', 'add', ua, m1());
     expect(r.reply).toMatch(/already on your list/);
   });
 });
@@ -213,10 +213,10 @@ describe('/watch and /unwatch', () => {
 
   it('moves proposed → watched → proposed', async () => {
     insertExpedition('niseko-0212', 'proposed');
-    const w = await handle('watch', null, { id: 'niseko-0212' }, devin());
+    const w = await handle('watch', null, { id: 'niseko-0212' }, m1());
     expect(w.reply).toMatch(/Watching/);
     expect(status('niseko-0212')).toBe('watched');
-    const u = await handle('unwatch', null, { id: 'niseko-0212' }, devin());
+    const u = await handle('unwatch', null, { id: 'niseko-0212' }, m1());
     expect(u.reply).toMatch(/Stopped/);
     expect(status('niseko-0212')).toBe('proposed');
   });
@@ -224,12 +224,12 @@ describe('/watch and /unwatch', () => {
   it('explains why a transition is refused', async () => {
     insertExpedition('old', 'retired');
     insertExpedition('w', 'watched');
-    expect((await handle('watch', null, { id: 'nope' }, devin())).reply).toMatch(/No expedition/);
-    expect((await handle('watch', null, { id: 'old' }, devin())).reply).toMatch(
+    expect((await handle('watch', null, { id: 'nope' }, m1())).reply).toMatch(/No expedition/);
+    expect((await handle('watch', null, { id: 'old' }, m1())).reply).toMatch(
       /window has passed/,
     );
-    expect((await handle('watch', null, { id: 'w' }, devin())).reply).toMatch(/already watched/);
-    expect((await handle('unwatch', null, { id: 'old' }, devin())).reply).toMatch(
+    expect((await handle('watch', null, { id: 'w' }, m1())).reply).toMatch(/already watched/);
+    expect((await handle('unwatch', null, { id: 'old' }, m1())).reply).toMatch(
       /window has passed/,
     );
     expect(status('old')).toBe('retired');
@@ -240,7 +240,7 @@ describe('/watch and /unwatch', () => {
 describe('/quiet', () => {
   it('writes quiet_until and isQuiet respects the clock', async () => {
     expect(isQuiet(db, NOW)).toBe(false);
-    const r = await handle('quiet', null, { days: 3 }, devin());
+    const r = await handle('quiet', null, { days: 3 }, m1());
     expect(r.reply).toMatch(/2026-12-04/);
     expect(kvGet(db, 'quiet_until')).toBe('2026-12-04T12:00:00.000Z');
     expect(isQuiet(db, NOW)).toBe(true);
@@ -254,7 +254,7 @@ describe('/quiet', () => {
     [90, 30],
     ['7', 7],
   ])('clamps %j days to %i', async (input, expected) => {
-    await handle('quiet', null, { days: input }, devin());
+    await handle('quiet', null, { days: input }, m1());
     const until = new Date(kvGet(db, 'quiet_until')!);
     expect((until.getTime() - NOW.getTime()) / 86_400_000).toBe(expected);
   });
@@ -267,21 +267,21 @@ describe('/quiet', () => {
 
 describe('/build', () => {
   it('returns the build action with parsed options', async () => {
-    const r = await handle('build', null, { destination: 'Niseko', month: '2027-02' }, devin());
+    const r = await handle('build', null, { destination: 'Niseko', month: '2027-02' }, m1());
     expect(r.action).toEqual({ kind: 'build', destination: 'niseko', month: '2027-02' });
     expect(r.ephemeral).toBeFalsy();
   });
 
   it('omits options that were not given', async () => {
-    const r = await handle('build', null, {}, devin());
+    const r = await handle('build', null, {}, m1());
     expect(r.action).toEqual({ kind: 'build' });
   });
 
   it('rejects an unknown destination or a malformed month without an action', async () => {
-    const bad = await handle('build', null, { destination: 'narnia' }, devin());
+    const bad = await handle('build', null, { destination: 'narnia' }, m1());
     expect(bad.action).toBeUndefined();
     expect(bad.reply).toMatch(/isn't on the board/);
-    const badMonth = await handle('build', null, { month: 'Feb' }, devin());
+    const badMonth = await handle('build', null, { month: 'Feb' }, m1());
     expect(badMonth.action).toBeUndefined();
     expect(badMonth.reply).toMatch(/YYYY-MM/);
   });
@@ -289,7 +289,7 @@ describe('/build', () => {
 
 describe('/trip', () => {
   it('falls back to the trip action when nothing is stored', async () => {
-    const r = await handle('trip', null, {}, devin());
+    const r = await handle('trip', null, {}, m1());
     expect(r).toEqual({ reply: 'no status yet', action: { kind: 'trip' } });
   });
 
@@ -300,7 +300,7 @@ describe('/trip', () => {
     db.prepare(
       `INSERT INTO kv (key, value, updated_at) VALUES ('anchor:content', '❄️ ASPEN · 54 days out', '2026-11-30T00:00:00Z')`,
     ).run();
-    const r = await handle('trip', null, {}, devin());
+    const r = await handle('trip', null, {}, m1());
     expect(r.reply).toBe('❄️ ASPEN · 54 days out');
     expect(r.action).toEqual({ kind: 'trip' });
   });
@@ -308,7 +308,7 @@ describe('/trip', () => {
 
 describe('unknown', () => {
   it('replies ephemerally to an unknown command', async () => {
-    const r = await handle('nope', null, {}, devin());
+    const r = await handle('nope', null, {}, m1());
     expect(r.ephemeral).toBe(true);
   });
 });

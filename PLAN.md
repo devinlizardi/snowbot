@@ -15,18 +15,18 @@ All money displayed in **USD**, always, regardless of where the trip is.
 
 | Member | Airports (in preference order) |
 |---|---|
-| Devin | **JFK**, LGA, EWR |
-| Andre | **EWR**, JFK, LGA |
-| Elliot | **BUR**, **LAX** — both priced every time |
-| Jeremy | **SNA**, **LAX** |
-| Hagen | **SFO**, OAK, SJC |
+| M1 | **JFK**, LGA, EWR |
+| M2 | **EWR**, JFK, LGA |
+| M3 | **BUR**, **LAX** — both priced every time |
+| M4 | **SNA**, **LAX** |
+| M5 | **SFO**, OAK, SJC |
 
 **2 East Coast + 3 California**, so every plan solves a convergence problem. Two strategies, both computed for every build:
 
-- **Consolidate West** — Elliot, Jeremy and Hagen all route through LAX or SFO, so the group buys 2 origins instead of 4. Usually cheaper and much better for long-haul: LAX/SFO have the nonstops to HND, NRT, CTS, YVR, ZRH; BUR and SNA have none.
+- **Consolidate West** — M3, M4 and M5 all route through LAX or SFO, so the group buys 2 origins instead of 4. Usually cheaper and much better for long-haul: LAX/SFO have the nonstops to HND, NRT, CTS, YVR, ZRH; BUR and SNA have none.
 - **Independent, converge at destination** — everyone books their own, and the bot solves for a shared arrival *window* so nobody eats six hours at the shuttle stop.
 
-Elliot gets BUR **and** LAX priced on every search, and the dossier states the delta out loud — "Elliot: BUR $684 / LAX $511, worth the drive" — so the drive-or-not call is made with the number attached rather than in the group chat at 1am.
+M3 gets BUR **and** LAX priced on every search, and the dossier states the delta out loud — "M3: BUR $684 / LAX $511, worth the drive" — so the drive-or-not call is made with the number attached rather than in the group chat at 1am.
 
 In config this is the `price_all: true` flag on a roster entry; it resolves to `member.pricedAirports`, which is what the flight and routing packets consume.
 
@@ -48,7 +48,7 @@ Weekly, the bot picks the single best destination on the board and **builds the 
 > **🇯🇵 NISEKO — Feb 12–20 — $2,340/person — 9 days (7 on snow)**
 > *ECMWF and WeatherNext both have 140–180cm falling in the 10 days before you'd land. Models agree — high confidence.*
 >
-> **Getting there** — Elliot, Jeremy and Hagen consolidate at LAX (Elliot BUR $684 / LAX $511; Jeremy SNA $698 / LAX $524 — both drive). ZIPAIR LAX→NRT $511 r/t. Devin and Andre out of JFK/EWR same day, $698. Everyone lands within 4 hours in Tokyo, one night there, then the 08:40 to CTS together.
+> **Getting there** — M3, M4 and M5 consolidate at LAX (M3 BUR $684 / LAX $511; M4 SNA $698 / LAX $524 — both drive). ZIPAIR LAX→NRT $511 r/t. M1 and M2 out of JFK/EWR same day, $698. Everyone lands within 4 hours in Tokyo, one night there, then the 08:40 to CTS together.
 > **Where you sleep** — 7 nights, 5-person chalet in Hirafu, $126/pp/night.
 > **Ground** — CTS→Hirafu bus $27 pp each way, pre-book.
 > **Passes** — IKON covers 5 days at Niseko United, no Feb blackout. Days 6–7 Rusutsu, also IKON.

@@ -135,7 +135,7 @@ If the key ever leaks, do step 5 first and the rest after.
 
 ## Inviting the bot to the real guild
 
-Elliot owns the guild (`DISCORD_GUILD_ID` in `.env.example`); only he can
+A friend owns the guild (`DISCORD_GUILD_ID` in `.env.example`); only they can
 invite. Build the URL in Developer Portal → OAuth2 → URL Generator, or use
 this shape with the app id from `DISCORD_APP_ID`:
 
@@ -154,7 +154,7 @@ Scopes: `bot applications.commands`. Permissions (integer `309237738560`):
 - Read Message History
 - Manage Messages (only for pinning the Aspen anchor)
 
-No Administrator, no Mention Everyone, no Manage Threads. After Elliot accepts:
+No Administrator, no Mention Everyone, no Manage Threads. After the guild owner accepts:
 `pnpm register-commands -- --guild real`, then run one job with
 `--channel real --dry-run` to confirm the channel resolves, then flip
 `SNOWBOT_CHANNEL=real` in `.env` and `docker compose up -d`.

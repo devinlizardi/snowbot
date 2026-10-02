@@ -266,7 +266,7 @@ describe('buildExpedition — Niseko (JP, 10 days)', () => {
     expect(e.confidence).toBe(e.weather.report.confidence);
     expect(e.asOf).toBe(NOW.toISOString());
     expect(e.routing.recommended).toBe('consolidate-west');
-    expect(e.routing.deltaLines[0]).toMatch(/^Elliot: BUR \$684 \/ LAX \$511 — worth the drive/);
+    expect(e.routing.deltaLines[0]).toMatch(/^M3: BUR \$684 \/ LAX \$511 — worth the drive/);
   });
 
   it('plans the days: travel at both ends plus the arrival day, one rest day, the rest on snow', () => {
@@ -307,13 +307,13 @@ describe('buildExpedition — Niseko (JP, 10 days)', () => {
   });
 
   it('totals the cost per person from the recommended routing', () => {
-    const elliot = e.cost.perMember.find((c) => c.member === 'Elliot')!;
-    expect(elliot.chosenOrigin).toBe('LAX');
-    expect(elliot.flightUsd).toBe(551); // $511 fare + ~$40 to LAX
-    expect(elliot.totalUsd).toBe(551 + 1134 + 54);
-    expect(elliot.notes.some((n) => n.startsWith('routing (consolidate-west)'))).toBe(true);
-    const devin = e.cost.perMember.find((c) => c.member === 'Devin')!;
-    expect(devin.totalUsd).toBe(698 + 1134 + 54);
+    const m3 = e.cost.perMember.find((c) => c.member === 'M3')!;
+    expect(m3.chosenOrigin).toBe('LAX');
+    expect(m3.flightUsd).toBe(551); // $511 fare + ~$40 to LAX
+    expect(m3.totalUsd).toBe(551 + 1134 + 54);
+    expect(m3.notes.some((n) => n.startsWith('routing (consolidate-west)'))).toBe(true);
+    const m1 = e.cost.perMember.find((c) => c.member === 'M1')!;
+    expect(m1.totalUsd).toBe(698 + 1134 + 54);
     expect(e.cost.groupUsd).toBe(e.cost.perMember.reduce((s, c) => s + c.totalUsd, 0));
     expect(e.cost.perPersonUsd).toBe(Math.round(e.cost.groupUsd / 5));
     expect(e.cost.ceilingUsd).toBe(cfg.expedition.ceiling_usd.international);

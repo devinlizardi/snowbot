@@ -234,10 +234,10 @@ describe('diffStatus', () => {
 describe('renderFlightTable', () => {
   it('lines everyone up in one code block', () => {
     const out = renderFlightTable([
-      { member: 'Devin', flight: 'UA1234', origin: 'SFO', dest: 'DEN', status: status() },
-      { member: 'Hagen', flight: 'DL9', origin: 'JFK', dest: 'ASE', status: null },
+      { member: 'M1', flight: 'UA1234', origin: 'SFO', dest: 'DEN', status: status() },
+      { member: 'M5', flight: 'DL9', origin: 'JFK', dest: 'ASE', status: null },
       {
-        member: 'Jeremy',
+        member: 'M4',
         flight: 'AA100',
         origin: 'ORD',
         dest: 'ASE',
@@ -247,9 +247,9 @@ describe('renderFlightTable', () => {
     const lines = out.split('\n');
     expect(lines[0]).toBe('```');
     expect(lines[1]).toMatch(/^member\s+flight\s+route\s+sched\s+est\s+status$/);
-    expect(lines[2]).toMatch(/^Devin\s+UA1234\s+SFO→DEN\s+15:00\s+15:00\s+scheduled · gate F12$/);
-    expect(lines[3]).toMatch(/^Hagen\s+DL9\s+JFK→ASE\s+--:--\s+--:--\s+no data$/);
-    expect(lines[4]).toMatch(/^Jeremy\s+AA100\s+ORD→ASE\s+15:00\s+15:45\s+delayed \+45m$/);
+    expect(lines[2]).toMatch(/^M1\s+UA1234\s+SFO→DEN\s+15:00\s+15:00\s+scheduled · gate F12$/);
+    expect(lines[3]).toMatch(/^M5\s+DL9\s+JFK→ASE\s+--:--\s+--:--\s+no data$/);
+    expect(lines[4]).toMatch(/^M4\s+AA100\s+ORD→ASE\s+15:00\s+15:45\s+delayed \+45m$/);
     expect(lines[5]).toBe('```');
   });
 });
@@ -258,11 +258,11 @@ describe('renderFlightTable', () => {
 
 const ROSTER: [string, string, string, string, string][] = [
   // member, airline, number, origin, scheduled_out
-  ['Devin', 'UA', '1234', 'SFO', '2027-01-24T15:05:00Z'],
-  ['Andre', 'UA', '1234', 'SFO', '2027-01-24T15:05:00Z'],
-  ['Elliot', 'DL', '2210', 'SEA', '2027-01-24T16:30:00Z'],
-  ['Jeremy', 'AA', '981', 'ORD', '2027-01-24T14:10:00Z'],
-  ['Hagen', 'B6', '77', 'JFK', '2027-01-24T13:55:00Z'],
+  ['M1', 'UA', '1234', 'SFO', '2027-01-24T15:05:00Z'],
+  ['M2', 'UA', '1234', 'SFO', '2027-01-24T15:05:00Z'],
+  ['M3', 'DL', '2210', 'SEA', '2027-01-24T16:30:00Z'],
+  ['M4', 'AA', '981', 'ORD', '2027-01-24T14:10:00Z'],
+  ['M5', 'B6', '77', 'JFK', '2027-01-24T13:55:00Z'],
 ];
 
 let db: DB;
@@ -315,7 +315,7 @@ const posts = () => db.prepare(`SELECT kind, summary FROM posts ORDER BY id`).al
 
 describe('flightWatch', () => {
   it('posts one combined message for five flights at T-24h', async () => {
-    // Devin and Andre are exactly at T-24h; the other three are outside ±35m but
+    // M1 and M2 are exactly at T-24h; the other three are outside ±35m but
     // still ride along in the one table. One window hit → one message, never five.
     await runFlightWatch(ctx('2027-01-23T15:05:00Z'), deps);
     const p = posts();
@@ -362,7 +362,7 @@ describe('flightWatch', () => {
     const after = posts().slice(before);
     expect(after).toHaveLength(1);
     expect(after[0]!.kind).toBe('root');
-    expect(after[0]!.summary).toContain('Jeremy AA981');
+    expect(after[0]!.summary).toContain('M4 AA981');
     expect(after[0]!.summary).toContain('+45m');
 
     // A flat re-check an hour later stays quiet.
@@ -376,7 +376,7 @@ describe('flightWatch', () => {
     await runFlightWatch(ctx('2027-01-24T02:00:00Z'), deps);
     const last = posts().at(-1)!;
     expect(last.kind).toBe('root');
-    expect(last.summary).toMatch(/Hagen B677: scheduled → cancelled/);
+    expect(last.summary).toMatch(/M5 B677: scheduled → cancelled/);
   });
 
   it('does not poll flights weeks out after the first sighting', async () => {
@@ -401,6 +401,6 @@ describe('flightWatch', () => {
     const sent = vi.spyOn(c.poster, 'postRoot');
     await runFlightWatch(c, flaky);
     expect(posts()).toHaveLength(1);
-    expect(sent.mock.calls[0]![0]).toMatch(/Elliot\s+DL2210\s+SEA→ASE\s+--:--\s+--:--\s+no data/);
+    expect(sent.mock.calls[0]![0]).toMatch(/M3\s+DL2210\s+SEA→ASE\s+--:--\s+--:--\s+no data/);
   });
 });

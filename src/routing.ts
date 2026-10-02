@@ -101,7 +101,7 @@ export type Routing = {
   recommended: StrategyName;
   reason: string;
   /** One line per member with a drive-or-not decision, e.g.
-   *  `Elliot: BUR $684 / LAX $511 — worth the drive (...)`. */
+   *  `M3: BUR $684 / LAX $511 — worth the drive (...)`. */
   deltaLines: string[];
 };
 
@@ -306,7 +306,7 @@ function recommend(
 
 /* -------------------------------------------------------------- deltas */
 
-/** "Elliot: BUR $684 / LAX $511 — worth the drive (...)". Only for members
+/** "M3: BUR $684 / LAX $511 — worth the drive (...)". Only for members
  *  who have a real choice: two priced airports, or a hub priced next to home. */
 function deltaLine(
   m: Member,

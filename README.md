@@ -43,7 +43,7 @@ pnpm dev -- job=<name> [--dry-run] [--channel test|real] [--now=2027-01-25T08:00
 - `--dry-run` prints what would be sent instead of sending it, and works
   without a Discord token.
 - `--channel` **defaults to `test`**. The live channel has to be asked for by
-  name, because it belongs to Elliot and a half-finished forecast landing there
+  name, because it belongs to a friend and a half-finished forecast landing there
   is the one failure mode that can't be undone. The deployed container sets
   `SNOWBOT_CHANNEL=real` in its environment.
 - `--now` injects a clock, so seasonal cadence and fare-watch logic can be
@@ -153,7 +153,7 @@ verification against live services, which needs real keys and a human:
 - [ ] Generate a fresh deploy keypair; never the personal `snowbot` key.
 - [ ] Run `deploy/bootstrap.sh`, first deploy with `SNOWBOT_DRY_RUN=1`, let it
       tick for a week in the test channel.
-- [ ] Elliot invites the bot to the real guild (scopes and permissions in
+- [ ] The guild owner invites the bot to the real guild (scopes and permissions in
       `deploy/README.md`), then `pnpm register-commands -- --guild real`.
 - [ ] Flip `SNOWBOT_CHANNEL=real`, `SNOWBOT_DRY_RUN=0`.
 

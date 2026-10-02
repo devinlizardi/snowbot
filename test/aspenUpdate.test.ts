@@ -205,7 +205,7 @@ function inputs(patch: Partial<ComposeInputs> = {}): ComposeInputs {
     },
     arrivals: [
       {
-        member: 'Devin',
+        member: 'M1',
         flight: 'UA1234',
         date: '2027-01-24',
         origin: 'JFK',
@@ -237,7 +237,7 @@ describe('composeBriefing / composeStatus', () => {
     expect(b.baseDepthCm).toBe(91);
     expect(b.seasonalNote).toBeNull();
     expect(b.groundNote).toContain('ASE > EGE > DEN');
-    expect(b.groundNote).toContain('Devin into ASE');
+    expect(b.groundNote).toContain('M1 into ASE');
 
     const s = composeStatus(b, TZ);
     expect(s.baseDepthIn).toBeCloseTo(91 / 2.54);
@@ -394,7 +394,7 @@ describe('runAspenUpdate', () => {
     completions = 0;
     const id = db
       .prepare(`INSERT INTO members (name, airports_json) VALUES (?, ?)`)
-      .run('Devin', '["JFK"]').lastInsertRowid;
+      .run('M1', '["JFK"]').lastInsertRowid;
     db.prepare(
       `INSERT INTO flights (member_id, airline, number, date, origin, dest) VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(id, 'UA', '1234', '2027-01-24', 'JFK', 'ASE');
