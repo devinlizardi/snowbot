@@ -114,3 +114,26 @@ describe('threads, live', () => {
     );
   });
 });
+
+describe('archived threads', () => {
+  it('reopens a thread Discord auto-archived before posting into it', async () => {
+    const calls: string[] = [];
+    const thread = {
+      archived: true,
+      isThread: () => true,
+      setArchived: async (v: boolean) => {
+        calls.push(`archived=${v}`);
+        thread.archived = v;
+      },
+      send: async () => {
+        calls.push(thread.archived ? 'send-while-archived' : 'send');
+        return { id: 'm9' };
+      },
+    };
+    const p = new Poster(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    (p as unknown as { client: unknown }).client = { channels: { fetch: async () => thread } };
+    const r = await p.postThread('t1', '✈️ Getting there');
+    expect(r.messageId).toBe('m9');
+    expect(calls).toEqual(['archived=false', 'send']);
+  });
+});

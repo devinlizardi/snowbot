@@ -59,6 +59,18 @@ import type { Job, JobContext } from './_runner.js';
 export const KV_BUILD_REQUEST = 'expedition:build_request';
 /** `expedition:details:<id>` → JSON array of the thread message ids, so a rebuild edits them. */
 export const kvDetailsKey = (id: string) => `expedition:details:${id}`;
+/** What the last build did, for the `/build` reply: `LastBuild` as JSON. */
+export const KV_LAST_BUILD = 'expedition:last_build';
+
+export type LastBuild = {
+  id: string;
+  destination: string;
+  window: DateWindow;
+  posted: boolean;
+  /** True when this edited an existing post (same destination and dates) rather than making one. */
+  rebuilt: boolean;
+  rootMessageId: string | null;
+};
 
 /** Earliest a window may start: fares need a lead, and so does the group. */
 export const MIN_LEAD_DAYS = 21;
@@ -234,7 +246,34 @@ export async function runExpeditionBuild(
 
   const dossier = await writeDossier(ctx, deps, built);
   const posted = await publish(ctx, built, dossier, existing ?? null);
+  const root = db
+    .prepare(`SELECT root_message_id FROM expeditions WHERE id = ?`)
+    .get(built.id) as { root_message_id: string | null } | undefined;
+  const last: LastBuild = {
+    id: built.id,
+    destination: built.destination.name,
+    window: built.window,
+    posted,
+    rebuilt: Boolean(existing?.root_message_id),
+    rootMessageId: root?.root_message_id ?? null,
+  };
+  kvSet(db, KV_LAST_BUILD, JSON.stringify(last));
   return { expedition: built, dossier, posted, forced };
+}
+
+/**
+ * The `/build` reply: where the dossier went. A rebuild edits a post that may
+ * be weeks up the channel, so say so and link it rather than "see the channel".
+ */
+export function buildReply(last: LastBuild | null, link: (messageId: string) => string | null): string {
+  if (!last) return 'Built — see the channel.';
+  const what = `**${last.destination}** ${fmtWindow(last.window)} (\`${last.id}\`)`;
+  if (!last.posted) return `Built ${what}, but it wasn't posted (quiet mode or the daily post budget). \`/watch ${last.id}\` still works.`;
+  const url = last.rootMessageId ? link(last.rootMessageId) : null;
+  const where = url ? ` → ${url}` : '';
+  return last.rebuilt
+    ? `Rebuilt ${what}: these dates were already posted, so I updated that post in place and its thread${where}`
+    : `Built ${what}${where} — flights, lodging and the plan are in its thread.`;
 }
 
 /** Weekly. The scheduler picks the day; `/build` fires it on demand. */

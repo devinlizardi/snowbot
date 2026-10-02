@@ -211,6 +211,24 @@ export class Poster {
     }
   }
 
+  /**
+   * Fetch a thread, reopening it if Discord auto-archived it (after a week of
+   * quiet). An archived thread is hidden from the channel and refuses new
+   * messages, so a rebuild of an old expedition would otherwise post into a
+   * thread nobody can see — or not at all.
+   */
+  private async openThread(threadId: string): Promise<ThreadChannel> {
+    if (!this.client) throw new Error('not connected');
+    const ch = await this.client.channels.fetch(threadId);
+    if (!ch || !ch.isThread()) throw new Error(`${threadId} is not a thread`);
+    const thread = ch as ThreadChannel;
+    if (thread.archived) {
+      log.info('reopening archived thread', { threadId });
+      await thread.setArchived(false, 'snowbot: posting an update');
+    }
+    return thread;
+  }
+
   /** Edit a message that lives in a thread (a channel `editMessage` can't see into). */
   async editThreadMessage(threadId: string, messageId: string, content: string): Promise<PostResult> {
     if (this.opts.dryRun || !this.client) {
@@ -219,9 +237,8 @@ export class Poster {
       this.record('edit', messageId, content.slice(0, 200));
       return { messageId, suppressed: false };
     }
-    const ch = await this.client.channels.fetch(threadId);
-    if (!ch || !ch.isThread()) throw new Error(`${threadId} is not a thread`);
-    const msg = await (ch as ThreadChannel).messages.fetch(messageId);
+    const ch = await this.openThread(threadId);
+    const msg = await ch.messages.fetch(messageId);
     await msg.edit({ content, allowedMentions: { parse: [] } });
     this.record('edit', messageId, content.slice(0, 200));
     return { messageId, suppressed: false };
@@ -243,10 +260,8 @@ export class Poster {
       this.record('thread', threadId, content.slice(0, 200));
       return { messageId: null, suppressed: false };
     }
-    if (!this.client) throw new Error('not connected');
-    const ch = await this.client.channels.fetch(threadId);
-    if (!ch || !ch.isThread()) throw new Error(`${threadId} is not a thread`);
-    const msg = await (ch as ThreadChannel).send({ content, allowedMentions: { parse: ['users'] } });
+    const ch = await this.openThread(threadId);
+    const msg = await ch.send({ content, allowedMentions: { parse: ['users'] } });
     this.record('thread', msg.id, content.slice(0, 200));
     return { messageId: msg.id, suppressed: false };
   }

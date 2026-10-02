@@ -5,6 +5,7 @@ import { kvGet, kvSet, openDb, type DB } from './db.js';
 import { attachInteractionHandler, type CommandAction } from './discord/commands.js';
 import type { Job } from './jobs/_runner.js';
 import { runJob } from './jobs/_runner.js';
+import { buildReply, KV_LAST_BUILD, type LastBuild } from './jobs/expeditionBuild.js';
 import { log } from './logger.js';
 import { startScheduler, type Scheduler } from './scheduler.js';
 
@@ -94,7 +95,12 @@ export async function startServe(
         kvSet(db, 'expedition:build_request', JSON.stringify(action));
         try {
           await runJob(job, { job: job.name, dryRun: false, target });
-          return `Built${action.destination ? ` ${action.destination}` : ''} — see the ${target} channel.`;
+          const raw = kvGet(db, KV_LAST_BUILD);
+          const last = raw ? (JSON.parse(raw) as LastBuild) : null;
+          const { guildId, channelId } = cfg.channels[target];
+          return buildReply(last, (m) =>
+            guildId && channelId ? `https://discord.com/channels/${guildId}/${channelId}/${m}` : null,
+          );
         } catch (err) {
           return `Build failed: ${err instanceof Error ? err.message : String(err)}`;
         }

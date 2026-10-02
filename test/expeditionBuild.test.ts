@@ -6,8 +6,11 @@ import { Poster } from '../src/discord/client.js';
 import { LlmClient } from '../src/llm/client.js';
 import type { JobContext } from '../src/jobs/_runner.js';
 import {
+  buildReply,
   KV_BUILD_REQUEST,
+  KV_LAST_BUILD,
   kvDetailsKey,
+  type LastBuild,
   pickWindow,
   runExpeditionBuild,
   type ExpeditionBuildDeps,
@@ -949,15 +952,51 @@ describe('runExpeditionBuild', () => {
       'detail-3',
     ]);
 
+    expect(JSON.parse(kvGet(db, KV_LAST_BUILD)!)).toMatchObject({
+      id: 'niseko-0206',
+      rebuilt: false,
+      posted: true,
+      rootMessageId: 'root-1',
+    });
+
     calls.length = 0;
     kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
     await runExpeditionBuild(c, deps());
+    expect(JSON.parse(kvGet(db, KV_LAST_BUILD)!)).toMatchObject({ rebuilt: true, rootMessageId: 'root-1' });
     expect(calls).toEqual([
       'edit:root-1',
       'edit:thread-1/detail-1',
       'edit:thread-1/detail-2',
       'edit:thread-1/detail-3',
     ]);
+  });
+});
+
+describe('buildReply', () => {
+  const last: LastBuild = {
+    id: 'niseko-0205',
+    destination: 'Niseko United',
+    window: { start: '2027-02-05', end: '2027-02-14' },
+    posted: true,
+    rebuilt: false,
+    rootMessageId: 'm1',
+  };
+  const link = (m: string) => `https://discord.com/channels/g/c/${m}`;
+
+  it('links a fresh post and says where the tables are', () => {
+    expect(buildReply(last, link)).toBe(
+      'Built **Niseko United** Feb 5–14 (`niseko-0205`) → https://discord.com/channels/g/c/m1 — flights, lodging and the plan are in its thread.',
+    );
+  });
+
+  it('says plainly when it updated an older post instead of making a new one', () => {
+    expect(buildReply({ ...last, rebuilt: true }, link)).toMatch(
+      /^Rebuilt .*these dates were already posted, so I updated that post in place and its thread → https:\/\/discord\.com\/channels\/g\/c\/m1$/,
+    );
+  });
+
+  it('owns up when nothing was posted', () => {
+    expect(buildReply({ ...last, posted: false, rootMessageId: null }, link)).toMatch(/wasn't posted/);
   });
 });
 
