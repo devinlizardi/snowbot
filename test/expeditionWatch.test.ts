@@ -217,15 +217,15 @@ const deps: ExpeditionWatchDeps = {
   },
 };
 
-function ctx(nowIso: string): JobContext {
-  const poster = new Poster(cfg, db, { dryRun: true, target: 'test', job: 'expeditionWatch' });
+function ctx(nowIso: string, target: 'test' | 'real' = 'test'): JobContext {
+  const poster = new Poster(cfg, db, { dryRun: true, target, job: 'expeditionWatch' });
   return {
     cfg,
     db,
     poster,
     llm: new LlmClient(cfg, db, 'expeditionWatch'),
     dryRun: true,
-    target: 'test',
+    target,
     now: new Date(nowIso),
     log: log.child({ test: true }),
   };
@@ -360,6 +360,17 @@ describe('expeditionWatch', () => {
     const thread = posts().filter((p) => p.kind === 'thread');
     expect(thread).toHaveLength(1);
     expect(roots()).toEqual([]); // three-of-five averages are not news against a five-person quote
+  });
+
+  it("leaves the other channel's expeditions alone", async () => {
+    // The fixture row predates channel_target, so it is test.
+    setFares(0.5);
+    await runExpeditionWatch(ctx(day(1), 'real'), deps);
+    expect(searches).toEqual([]);
+    expect(posts()).toEqual([]);
+    expect(fareRows()).toEqual([]);
+    await runExpeditionWatch(ctx(day(1), 'test'), deps);
+    expect(searches).not.toEqual([]);
   });
 
   it('ignores proposed and retired expeditions', async () => {

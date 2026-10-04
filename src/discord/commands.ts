@@ -8,6 +8,7 @@ import {
   type Client,
 } from 'discord.js';
 import type { Config } from '../config.js';
+import type { ChannelTarget } from './client.js';
 import { kvGet, kvSet, type DB } from '../db.js';
 import { log } from '../logger.js';
 
@@ -27,6 +28,8 @@ export type CommandContext = {
   cfg: Config;
   now: Date;
   user: { id: string; name: string };
+  /** Which channel this bot posts to; an expedition built for the other one can't be watched here. */
+  target?: ChannelTarget;
 };
 
 export type CommandAction =
@@ -435,9 +438,14 @@ function setWatch(
   if (!id) return oops('Usage: `/watch <id>` — the id is at the bottom of the dossier.');
   const from = to === 'watched' ? 'proposed' : 'watched';
   const row = ctx.db
-    .prepare('SELECT id, destination, status FROM expeditions WHERE id = ?')
-    .get(id) as { id: string; destination: string; status: string } | undefined;
+    .prepare('SELECT id, destination, status, channel_target FROM expeditions WHERE id = ?')
+    .get(id) as
+    | { id: string; destination: string; status: string; channel_target: ChannelTarget }
+    | undefined;
   if (!row) return oops(`No expedition called "${id}".`);
+  if (ctx.target && row.channel_target !== ctx.target) {
+    return oops(`${id} was posted in the ${row.channel_target} channel — (un)watch it there.`);
+  }
   if (row.status !== from) {
     const why =
       row.status === 'retired'
@@ -522,6 +530,7 @@ export async function registerCommands(args: {
 export type InteractionDeps = {
   db: DB;
   cfg: Config;
+  target?: ChannelTarget;
   /** Runs the returned action; whatever it resolves to replaces the reply. */
   onAction?: (action: CommandAction, ctx: CommandContext) => Promise<string | undefined>;
   now?: () => Date;
@@ -559,6 +568,7 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
       db: deps.db,
       cfg: deps.cfg,
       now: deps.now ? deps.now() : new Date(),
+      ...(deps.target ? { target: deps.target } : {}),
       user: {
         id: interaction.user.id,
         name:

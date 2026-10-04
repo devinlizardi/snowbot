@@ -242,7 +242,7 @@ export async function runExpeditionBuild(
   const existing = db
     .prepare(`SELECT root_message_id, thread_id FROM expeditions WHERE id = ?`)
     .get(built.id) as { root_message_id: string | null; thread_id: string | null } | undefined;
-  insertExpedition(db, built);
+  insertExpedition(db, built, ctx.target);
 
   const dossier = await writeDossier(ctx, deps, built);
   const posted = await publish(ctx, built, dossier, existing ?? null);

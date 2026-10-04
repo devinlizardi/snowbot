@@ -466,7 +466,7 @@ describe('expeditions table round-trip', () => {
   it('survives to-row / insert / select / from-row unchanged', () => {
     const db = openDb(':memory:');
     const e = buildExpedition(nisekoInputs(), cfg, NOW);
-    insertExpedition(db, e);
+    insertExpedition(db, e, 'test');
 
     const row = db.prepare('SELECT * FROM expeditions WHERE id = ?').get(e.id) as ExpeditionRow;
     expect(row).toMatchObject({
@@ -484,21 +484,22 @@ describe('expeditions table round-trip', () => {
     expect(expeditionToRow(e).plan_json).toBe(row.plan_json);
   });
 
-  it('refreshes the plan on a rebuild without touching status or message ids', () => {
+  it('refreshes the plan on a rebuild without touching status, channel or message ids', () => {
     const db = openDb(':memory:');
     const first = buildExpedition(nisekoInputs(), cfg, NOW);
-    insertExpedition(db, first);
+    insertExpedition(db, first, 'test');
     db.prepare(
       `UPDATE expeditions SET status = 'watched', root_message_id = 'm1' WHERE id = ?`,
     ).run(first.id);
 
     const later = new Date('2026-09-21T12:00:00Z');
     const second = buildExpedition(nisekoInputs(), cfg, later);
-    insertExpedition(db, second);
+    insertExpedition(db, second, 'real');
 
     const rows = db.prepare('SELECT * FROM expeditions').all() as ExpeditionRow[];
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ status: 'watched', root_message_id: 'm1' });
+    // …nor its channel: the post lives where the first build put it.
+    expect(rows[0]).toMatchObject({ status: 'watched', root_message_id: 'm1', channel_target: 'test' });
     expect(rowToExpedition(rows[0]!).asOf).toBe(later.toISOString());
   });
 });

@@ -236,6 +236,15 @@ describe('/watch and /unwatch', () => {
     expect(status('old')).toBe('retired');
     expect(status('w')).toBe('watched');
   });
+
+  it("won't watch an expedition that was posted in the other channel", async () => {
+    insertExpedition('niseko-0212', 'proposed'); // channel_target defaults to test
+    const r = await handle('watch', null, { id: 'niseko-0212' }, { ...m1(), target: 'real' });
+    expect(r.reply).toMatch(/posted in the test channel/);
+    expect(status('niseko-0212')).toBe('proposed');
+    const t = await handle('watch', null, { id: 'niseko-0212' }, { ...m1(), target: 'test' });
+    expect(t.reply).toMatch(/Watching/);
+  });
 });
 
 describe('/quiet', () => {

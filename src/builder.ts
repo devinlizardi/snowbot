@@ -1,5 +1,6 @@
 import type { Config, Destination, Quote } from './config.js';
 import type { DB } from './db.js';
+import type { ChannelTarget } from './discord/client.js';
 import type { JobContext } from './jobs/_runner.js';
 import { originsToPrice, solveRouting, type Routing } from './routing.js';
 import { cached } from './sources/_cache.js';
@@ -679,16 +680,16 @@ export function rowToExpedition(row: Pick<ExpeditionRow, 'plan_json'>): Expediti
 }
 
 /** Insert, or refresh the plan of an existing id without touching its
- *  status or Discord ids — a rebuild of the same window is an update, not a
+ *  status, channel or Discord ids — a rebuild of the same window is an update, not a
  *  second expedition. */
-export function insertExpedition(db: DB, e: Expedition): void {
-  const r = expeditionToRow(e);
+export function insertExpedition(db: DB, e: Expedition, target: ChannelTarget): void {
+  const r = { ...expeditionToRow(e), channel_target: target };
   db.prepare(
     `INSERT INTO expeditions
        (id, destination, window_start, window_end, days_total, days_on_snow,
-        plan_json, total_pp_usd, confidence, status)
+        plan_json, total_pp_usd, confidence, status, channel_target)
      VALUES (@id, @destination, @window_start, @window_end, @days_total, @days_on_snow,
-        @plan_json, @total_pp_usd, @confidence, @status)
+        @plan_json, @total_pp_usd, @confidence, @status, @channel_target)
      ON CONFLICT(id) DO UPDATE SET
        days_total = excluded.days_total,
        days_on_snow = excluded.days_on_snow,

@@ -146,16 +146,17 @@ export function renderWatchTable(rows: readonly WatchRow[]): string {
 /* ----------------------------------------------------------------- the job */
 
 export async function runExpeditionWatch(ctx: JobContext, deps: ExpeditionWatchDeps): Promise<void> {
-  const { db, cfg, poster, now, log } = ctx;
+  const { db, cfg, poster, now, log, target } = ctx;
   const offline = ctx.dryRun && !optionalSecret('SERPAPI_KEY');
   if (offline) log.warn('no SERPAPI_KEY in a dry run — serving cache only');
 
   const rows = db
     .prepare(
       `SELECT id, destination, window_start, window_end, plan_json, status, thread_id
-       FROM expeditions WHERE status = 'watched' ORDER BY window_start, id`,
+       FROM expeditions WHERE status = 'watched' AND channel_target = ?
+       ORDER BY window_start, id`,
     )
-    .all() as ExpeditionRow[];
+    .all(target) as ExpeditionRow[];
   if (rows.length === 0) {
     log.info('quiet — nothing watched');
     return;
