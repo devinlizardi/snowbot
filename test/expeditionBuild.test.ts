@@ -916,6 +916,44 @@ describe('runExpeditionBuild', () => {
     );
   });
 
+  it('keeps the root message id when thread creation throws, so a rebuild edits instead of reposting', async () => {
+    const calls: string[] = [];
+    let threadFails = true;
+    class FlakyThreads extends Poster {
+      override get connected() {
+        return true;
+      }
+      override async postRoot() {
+        calls.push('root');
+        return { messageId: 'root-1', suppressed: false };
+      }
+      override async editMessage(id: string) {
+        calls.push(`edit:${id}`);
+        return { messageId: id, suppressed: false };
+      }
+      override async ensureThread() {
+        if (threadFails) throw new Error('Missing Permissions');
+        return 'thread-1';
+      }
+      override async postThread(threadId: string | null) {
+        calls.push(`thread:${threadId}`);
+        return { messageId: `d-${calls.length}`, suppressed: false };
+      }
+    }
+    const poster = new FlakyThreads(cfg, db, { dryRun: false, target: 'test', job: 'expeditionBuild' });
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
+    await expect(runExpeditionBuild(ctx({ poster }), deps())).rejects.toThrow(/Missing Permissions/);
+    expect(expeditions()[0]).toMatchObject({ root_message_id: 'root-1', thread_id: null });
+
+    threadFails = false;
+    calls.length = 0;
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ destination: 'niseko' }));
+    await runExpeditionBuild(ctx({ poster }), deps());
+    expect(calls[0]).toBe('edit:root-1');
+    expect(calls).not.toContain('root');
+    expect(expeditions()[0]!.thread_id).toBe('thread-1');
+  });
+
   it('a rebuild edits the root and every thread section in place', async () => {
     const calls: string[] = [];
     let n = 0;
