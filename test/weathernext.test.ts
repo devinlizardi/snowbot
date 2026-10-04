@@ -2,8 +2,10 @@ import { BigQuery } from '@google-cloud/bigquery';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import {
-  buildInitTimeQuery,
   buildQuery,
+  candidateInitTimes,
+  LOOKBACK_HOURS,
+  PUBLISH_LAG_HOURS,
   forecastJobOptions,
   kelvinToC,
   metresToMm,
@@ -47,10 +49,6 @@ describe('query construction', () => {
       expect(q).toContain(`total_precipitation_1hr_${p}`);
     }
   });
-
-  it('bounds the init-time lookup too', () => {
-    expect(buildInitTimeQuery(TABLE, 12)).toContain('WHERE init_time >=');
-  });
 });
 
 describe('forecast job options', () => {
@@ -70,6 +68,72 @@ describe('forecast job options', () => {
     expect(
       BigQuery.valueToQueryParameter_('2026-10-04T09:00:00.000Z', 'TIMESTAMP').parameterValue?.value,
     ).toBeUndefined();
+  });
+});
+
+describe('which run to ask for', () => {
+  const at = (iso: string) => candidateInitTimes(new Date(iso));
+
+  it('takes the newest 6-hourly cycle that has had time to publish, then the one before', () => {
+    expect(at('2026-10-04T10:00:00Z')).toEqual(['2026-10-04T00:00:00.000Z', '2026-10-03T18:00:00.000Z']);
+    expect(at('2026-10-04T06:59:00Z')).toEqual(['2026-10-03T18:00:00.000Z', '2026-10-03T12:00:00.000Z']);
+    expect(at('2026-10-04T07:00:00Z')).toEqual(['2026-10-04T00:00:00.000Z', '2026-10-03T18:00:00.000Z']);
+  });
+
+  it('never picks an hourly (48-step) run, and both candidates sit inside the lookback', () => {
+    for (let m = 0; m < 24 * 60; m += 7) {
+      const now = new Date(Date.parse('2026-10-04T00:00:00Z') + m * 60_000);
+      for (const c of candidateInitTimes(now)) {
+        const d = new Date(c);
+        expect(d.getUTCHours() % 6).toBe(0);
+        expect(d.getUTCMinutes()).toBe(0);
+        const ageH = (now.getTime() - d.getTime()) / 3_600_000;
+        expect(ageH).toBeGreaterThanOrEqual(PUBLISH_LAG_HOURS);
+        expect(ageH).toBeLessThan(LOOKBACK_HOURS);
+      }
+    }
+  });
+});
+
+describe('resolving the run once per job', () => {
+  const cfg = loadConfig({ env: { GCP_PROJECT_ID: 'p', GCP_DATASET_ID: 'weathernext_3' } });
+  const NOW = new Date('2026-10-04T10:00:00Z');
+  const row = { forecast_time: '2026-10-04T01:00:00Z', lead_hours: 1, temperature_2m_mean: 270 };
+  const spots = Array.from({ length: 16 }, (_, i) => ({ lat: 40 + i * 0.5, lon: -106 }));
+
+  function stub(published: Set<string>) {
+    const asked: string[] = [];
+    const runQuery = async (opts: { params: { initTime: Date } }) => {
+      const init = opts.params.initTime.toISOString();
+      asked.push(init);
+      await new Promise((r) => setTimeout(r, 1));
+      return { rows: published.has(init) ? [row] : [], bytes: 1000 };
+    };
+    return { asked, runQuery };
+  }
+
+  it('settles the run on the first spot and reuses it for the other fifteen', async () => {
+    const { asked, runQuery } = stub(new Set(['2026-10-04T00:00:00.000Z']));
+    const src = weathernextSource(cfg, { runQuery, now: () => NOW });
+    const got = await Promise.all(spots.map((coord) => src.fetch({ coord, hours: 360, ttlMinutes: 60 })));
+    expect(asked).toHaveLength(16);
+    expect(new Set(asked)).toEqual(new Set(['2026-10-04T00:00:00.000Z']));
+    expect(got.every((f) => f.initTime === '2026-10-04T00:00:00.000Z' && f.steps.length === 1)).toBe(true);
+  });
+
+  it('falls back one cycle when the newest has not published, once for the whole job', async () => {
+    const { asked, runQuery } = stub(new Set(['2026-10-03T18:00:00.000Z']));
+    const src = weathernextSource(cfg, { runQuery, now: () => NOW });
+    const got = await Promise.all(spots.map((coord) => src.fetch({ coord, hours: 360, ttlMinutes: 60 })));
+    expect(asked.filter((a) => a === '2026-10-04T00:00:00.000Z')).toHaveLength(1);
+    expect(asked).toHaveLength(17);
+    expect(got.every((f) => f.initTime === '2026-10-03T18:00:00.000Z')).toBe(true);
+  });
+
+  it('fails loudly when neither cycle is there', async () => {
+    const { runQuery } = stub(new Set());
+    const src = weathernextSource(cfg, { runQuery, now: () => NOW });
+    await expect(src.fetch({ coord: ASPEN, hours: 360, ttlMinutes: 60 })).rejects.toThrow(/no WeatherNext long run/);
   });
 });
 
