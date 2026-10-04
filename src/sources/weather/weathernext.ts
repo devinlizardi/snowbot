@@ -173,7 +173,10 @@ export function weathernextSource(
       const bq = new BigQuery({ projectId });
       const [job] = await bq.createQueryJob(opts);
       const [rows] = await job.getQueryResults();
-      const bytes = Number(job.metadata?.statistics?.totalBytesProcessed ?? 0);
+      // job.metadata is the jobs.insert snapshot and getQueryResults never
+      // refreshes it, so the byte count has to be fetched once the job is done.
+      const [meta] = await job.getMetadata();
+      const bytes = Number(meta?.statistics?.totalBytesProcessed ?? 0);
       return { rows: rows as Record<string, unknown>[], bytes };
     });
 
