@@ -84,6 +84,7 @@ export async function startServe(
     attachInteractionHandler(client, {
       db,
       cfg,
+      target,
       onAction: async (action: CommandAction, ctx) => {
         if (action.kind === 'trip') {
           return tripText(db) ?? 'No Aspen status yet — the first briefing has not run.';

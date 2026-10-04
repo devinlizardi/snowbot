@@ -38,7 +38,38 @@ export type RawResponse = {
   hourly?: RawSeries;
 };
 
+/** A failed call, with the status kept so callers can tell a rate limit from a bad request. */
+export class OpenMeteoHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly reason: string,
+    url: string,
+  ) {
+    super(`open-meteo ${status}: ${reason} [${url}]`);
+    this.name = 'OpenMeteoHttpError';
+  }
+}
+
+/** One retry after this long (plus up to half again in jitter) on a 429. */
+export const RATE_LIMIT_RETRY_MS = 1500;
+
+/**
+ * A 429 ("Too many concurrent requests") is retried once after a short pause;
+ * a second one is thrown, so `cached()` serves the stale row instead.
+ */
 export async function getJson(url: string, params: Record<string, string | number>): Promise<RawResponse> {
+  try {
+    return await getJsonOnce(url, params);
+  } catch (err) {
+    if (!(err instanceof OpenMeteoHttpError) || err.status !== 429) throw err;
+    const delay = RATE_LIMIT_RETRY_MS * (1 + Math.random() / 2);
+    log.warn('open-meteo rate limited, retrying once', { url, delayMs: Math.round(delay) });
+    await new Promise((r) => setTimeout(r, delay));
+    return getJsonOnce(url, params);
+  }
+}
+
+async function getJsonOnce(url: string, params: Record<string, string | number>): Promise<RawResponse> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) qs.set(k, String(v));
   const full = `${url}?${qs}`;
@@ -47,9 +78,18 @@ export async function getJson(url: string, params: Record<string, string | numbe
     .json()
     .catch(() => ({ error: true, reason: `non-JSON response (${res.status})` }))) as RawResponse & Partial<OpenMeteoError>;
   if (!res.ok || body.error) {
-    throw new Error(`open-meteo ${res.status}: ${body.reason ?? 'unknown'} [${url}]`);
+    throw new OpenMeteoHttpError(res.status, body.reason ?? 'unknown', url);
   }
   return body;
+}
+
+/**
+ * Open-Meteo's answer to a variable a model doesn't carry: a 400 whose reason
+ * names it. Anything else (a 429, a 5xx, a network error) is not this.
+ */
+export function isUnsupportedVariable(err: unknown): boolean {
+  if (!(err instanceof OpenMeteoHttpError) || err.status !== 400) return false;
+  return OPTIONAL_HOURLY.some((v) => err.reason.includes(v)) || /variable/i.test(err.reason);
 }
 
 /**
@@ -78,7 +118,10 @@ export async function fetchModelForecast(
 
   const missingVariables: string[] = [];
   const json = await getJson(FORECAST_URL, { ...base, hourly: OPTIONAL_HOURLY.join(',') }).catch(
-    async (err) => {
+    async (err: unknown) => {
+      // Only a rejected variable earns the reduced retry. Retrying a rate
+      // limit here doubled the requests into it and logged the wrong reason.
+      if (!isUnsupportedVariable(err)) throw err;
       log.warn('model lacks optional hourly variables, retrying without them', {
         model,
         error: String(err),

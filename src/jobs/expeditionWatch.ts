@@ -54,6 +54,13 @@ export type WatchRow = {
 
 /** A ±10% move against yesterday is news; anything smaller is thread chatter. */
 const PING_THRESHOLD = 0.1;
+/** A new low only counts once it beats the old one by this much: $476 → $470 is noise. */
+export const NEW_FLOOR_MARGIN = 0.03;
+
+/** Cheaper than every prior check by at least `NEW_FLOOR_MARGIN`. */
+export function isNewFloor(newAvg: number, floorAvg: number | null): boolean {
+  return floorAvg !== null && newAvg <= floorAvg * (1 - NEW_FLOOR_MARGIN);
+}
 
 /* ------------------------------------------------------------ pure pieces */
 
@@ -124,7 +131,7 @@ export function classifyMove(
     if (delta <= -PING_THRESHOLD) return 'down';
     if (delta >= PING_THRESHOLD) return 'up';
   }
-  if (floorAvg !== null && newAvg < floorAvg) return 'new-floor';
+  if (isNewFloor(newAvg, floorAvg)) return 'new-floor';
   return 'flat';
 }
 
@@ -146,16 +153,17 @@ export function renderWatchTable(rows: readonly WatchRow[]): string {
 /* ----------------------------------------------------------------- the job */
 
 export async function runExpeditionWatch(ctx: JobContext, deps: ExpeditionWatchDeps): Promise<void> {
-  const { db, cfg, poster, now, log } = ctx;
+  const { db, cfg, poster, now, log, target } = ctx;
   const offline = ctx.dryRun && !optionalSecret('SERPAPI_KEY');
   if (offline) log.warn('no SERPAPI_KEY in a dry run — serving cache only');
 
   const rows = db
     .prepare(
       `SELECT id, destination, window_start, window_end, plan_json, status, thread_id
-       FROM expeditions WHERE status = 'watched' ORDER BY window_start, id`,
+       FROM expeditions WHERE status = 'watched' AND channel_target = ?
+       ORDER BY window_start, id`,
     )
-    .all() as ExpeditionRow[];
+    .all(target) as ExpeditionRow[];
   if (rows.length === 0) {
     log.info('quiet — nothing watched');
     return;
@@ -234,9 +242,18 @@ export async function runExpeditionWatch(ctx: JobContext, deps: ExpeditionWatchD
     const headline = `💸 **${row.id}** · ${checkedAt.slice(0, 10)} · ${usd(newAvg)}/pp avg` +
       (prevAvg !== null ? ` (${deltaCell(newAvg, prevAvg)} vs last)` : '') +
       (floorAvg !== null ? ` · floor ${usd(Math.min(floorAvg, newAvg))}` : '');
-    await poster.postThread(row.thread_id, [headline, renderWatchTable(table)].join('\n'));
+    const reply = await poster.postThread(row.thread_id, [headline, renderWatchTable(table)].join('\n'));
 
     if (move === 'flat') continue;
+    if (reply.suppressed) {
+      // A headline in the channel with nothing behind it is worse than no ping.
+      log.warn('thread reply suppressed — skipping the root ping too', {
+        id: row.id,
+        move,
+        reason: reply.reason,
+      });
+      continue;
+    }
     if (isQuiet(db, now)) {
       log.info('move worth a ping, but /quiet is on — thread only', { id: row.id, move });
       continue;
@@ -296,26 +313,27 @@ function memberIdFor(db: DB, name: string): number | null {
   return row?.id ?? null;
 }
 
-function pingText(
-  row: ExpeditionRow,
+/** The channel ping. Each sentence is built without its final period so `end` can close it. */
+export function pingText(
+  row: Pick<ExpeditionRow, 'id' | 'thread_id'>,
   move: Move,
   newAvg: number,
   prevAvg: number | null,
   floorAvg: number | null,
 ): string {
-  const where = row.thread_id ? ' — details in the thread.' : '.';
+  const end = row.thread_id ? ' — details in the thread.' : '.';
   const was = prevAvg !== null ? ` (was ${usd(prevAvg)})` : '';
   switch (move) {
     case 'down': {
-      const floorNote = floorAvg !== null && newAvg < floorAvg ? ' New floor.' : '';
-      return `📉 **${row.id}** fares down ${pct(newAvg, prevAvg)} — ${usd(newAvg)}/pp avg${was}.${floorNote}${where}`;
+      const floorNote = isNewFloor(newAvg, floorAvg) ? ' New floor.' : '';
+      return `📉 **${row.id}** fares down ${pct(newAvg, prevAvg)} — ${usd(newAvg)}/pp avg${was}${end}${floorNote}`;
     }
     case 'up':
-      return `📈 **${row.id}** fares up ${pct(newAvg, prevAvg)} — ${usd(newAvg)}/pp avg${was}.${where}`;
+      return `📈 **${row.id}** fares up ${pct(newAvg, prevAvg)} — ${usd(newAvg)}/pp avg${was}${end}`;
     case 'new-floor':
-      return `🔻 **${row.id}** new floor — ${usd(newAvg)}/pp avg, the cheapest since we started watching${floorAvg !== null ? ` (was ${usd(floorAvg)})` : ''}.${where}`;
+      return `🔻 **${row.id}** new floor — ${usd(newAvg)}/pp avg, the cheapest since we started watching${floorAvg !== null ? ` (was ${usd(floorAvg)})` : ''}${end}`;
     case 'flat':
-      return `**${row.id}** — ${usd(newAvg)}/pp avg${where}`;
+      return `**${row.id}** — ${usd(newAvg)}/pp avg${end}`;
   }
 }
 

@@ -242,7 +242,7 @@ export async function runExpeditionBuild(
   const existing = db
     .prepare(`SELECT root_message_id, thread_id FROM expeditions WHERE id = ?`)
     .get(built.id) as { root_message_id: string | null; thread_id: string | null } | undefined;
-  insertExpedition(db, built);
+  insertExpedition(db, built, ctx.target);
 
   const dossier = await writeDossier(ctx, deps, built);
   const posted = await publish(ctx, built, dossier, existing ?? null);
@@ -535,15 +535,17 @@ async function publish(
   }
   let threadId: string | null = null;
   if (posted.messageId) {
+    // Saved before the thread is attempted: the pitch is live in Discord now,
+    // and if the thread fails a rebuild must edit this message, not post a
+    // second root. (The rebuild path also makes the missing thread.)
+    db.prepare(`UPDATE expeditions SET root_message_id = ? WHERE id = ?`).run(posted.messageId, e.id);
     threadId = await poster.ensureThread(
       posted.messageId,
       `${e.destination.name} ${fmtWindow(e.window)}`,
     );
-    db.prepare(`UPDATE expeditions SET root_message_id = ?, thread_id = ? WHERE id = ?`).run(
-      posted.messageId,
-      threadId,
-      e.id,
-    );
+    if (threadId) {
+      db.prepare(`UPDATE expeditions SET thread_id = ? WHERE id = ?`).run(threadId, e.id);
+    }
   }
   // Dry runs have no thread; postThread prints the sections so the whole dossier is readable.
   const ids: string[] = [];

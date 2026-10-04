@@ -93,21 +93,104 @@ ${cols}
     ORDER BY f.hours ASC`.replace('@lookbackHours', String(lookbackHours));
 }
 
-/** The most recent run available, found without scanning history. */
-export function buildInitTimeQuery(table: string, lookbackHours: number): string {
-  return `
-    SELECT MAX(init_time) AS init_time
-    FROM \`${table}\`
-    WHERE init_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${lookbackHours} HOUR)`;
+/**
+ * The forecast query's job options. `initTime` must be a Date: the Node client
+ * turns a string declared as TIMESTAMP into a parameter with a type and no
+ * value, so the query became `init_time = NULL`, pruned every partition and
+ * returned nothing.
+ */
+export function forecastJobOptions(
+  table: string,
+  lookbackHours: number,
+  initTime: string,
+  coord: Coord,
+  hours: number,
+  maxBytes: number,
+) {
+  return {
+    query: buildQuery(table, lookbackHours),
+    params: { initTime: new Date(initTime), box: boxAround(coord), hours },
+    types: { initTime: 'TIMESTAMP', box: 'STRING', hours: 'INT64' },
+    maximumBytesBilled: String(maxBytes),
+  };
 }
 
-export function weathernextSource(cfg: Config): Source<WeatherNextParams, WeatherNextForecast> {
+/**
+ * Only the 00/06/12/18Z cycles run the full 360h; the hourly runs in between
+ * stop at 48. A run shows up in the table about seven hours after its init.
+ */
+export const LONG_RUN_EVERY_HOURS = 6;
+export const PUBLISH_LAG_HOURS = 7;
+/**
+ * Partition-pruning window for the forecast query. The fallback candidate can
+ * be up to 19h old (7h lag + up to 6h into the cycle + one cycle back).
+ */
+export const LOOKBACK_HOURS = 24;
+/** How long a source instance trusts the run it settled on. */
+const RESOLVED_TTL_MS = 60 * 60_000;
+
+/**
+ * The run to ask for, derived from the clock instead of `SELECT MAX(init_time)`
+ * (which scans ~247 MB and would also pick a 48-step hourly run): the newest
+ * long cycle that should have published, then the one before it in case this
+ * one is late.
+ */
+export function candidateInitTimes(now: Date): [string, string] {
+  const cycleMs = LONG_RUN_EVERY_HOURS * 3_600_000;
+  const newest = Math.floor((now.getTime() - PUBLISH_LAG_HOURS * 3_600_000) / cycleMs) * cycleMs;
+  return [new Date(newest).toISOString(), new Date(newest - cycleMs).toISOString()];
+}
+
+export type QueryRunner = (
+  opts: ReturnType<typeof forecastJobOptions>,
+) => Promise<{ rows: Record<string, unknown>[]; bytes: number }>;
+
+export type WeatherNextDeps = {
+  /** Tests stub this; production runs the job in BigQuery. */
+  runQuery?: QueryRunner;
+  now?: () => Date;
+};
+
+/**
+ * One instance per job. The first spot settles which run to use (trying the
+ * clock's newest long cycle, then the one before); every other spot, including
+ * ones already waiting concurrently, reuses that answer, so a 16-spot snapshot
+ * costs 16 forecast queries and no lookups.
+ */
+export function weathernextSource(
+  cfg: Config,
+  deps: WeatherNextDeps = {},
+): Source<WeatherNextParams, WeatherNextForecast> {
   const { projectId, datasetId, table } = cfg.bigquery;
   const fq = `${projectId}.${datasetId}.${table}`;
   const maxBytes = cfg.weather.bigquery.max_bytes_billed;
-  // WeatherNext initialises hourly, so a 12h window always contains a run even
-  // if the most recent few are still publishing.
-  const LOOKBACK_HOURS = 12;
+  const now = deps.now ?? (() => new Date());
+  let resolved: { initTime: Promise<string>; at: number } | null = null;
+
+  const runQuery: QueryRunner =
+    deps.runQuery ??
+    (async (opts) => {
+      const bq = new BigQuery({ projectId });
+      const [job] = await bq.createQueryJob(opts);
+      const [rows] = await job.getQueryResults();
+      // job.metadata is the jobs.insert snapshot and getQueryResults never
+      // refreshes it, so the byte count has to be fetched once the job is done.
+      const [meta] = await job.getMetadata();
+      const bytes = Number(meta?.statistics?.totalBytesProcessed ?? 0);
+      return { rows: rows as Record<string, unknown>[], bytes };
+    });
+
+  const forecast = async (initTime: string, p: WeatherNextParams) => {
+    const res = await runQuery(
+      forecastJobOptions(fq, LOOKBACK_HOURS, initTime, p.coord, p.hours, maxBytes),
+    );
+    log.info('weathernext query', {
+      initTime,
+      rows: res.rows.length,
+      megabytesProcessed: Math.round(res.bytes / 1e5) / 10,
+    });
+    return res;
+  };
 
   return {
     name: 'weathernext:bigquery',
@@ -117,35 +200,39 @@ export function weathernextSource(cfg: Config): Source<WeatherNextParams, Weathe
       if (!projectId || !datasetId) {
         throw new Error('GCP_PROJECT_ID / GCP_DATASET_ID are not set — cannot query WeatherNext');
       }
-      const bq = new BigQuery({ projectId });
 
-      const [initJob] = await bq.createQueryJob({
-        query: buildInitTimeQuery(fq, LOOKBACK_HOURS),
-        maximumBytesBilled: String(maxBytes),
-      });
-      const [initRows] = await initJob.getQueryResults();
-      const initTime = (initRows[0] as { init_time?: { value?: string } | string } | undefined)?.init_time;
-      const initValue = typeof initTime === 'string' ? initTime : initTime?.value;
-      if (!initValue) {
-        throw new Error(`no WeatherNext run in the last ${LOOKBACK_HOURS}h — is the subscription still live?`);
+      const t = now();
+      let first: { rows: Record<string, unknown>[]; bytes: number } | undefined;
+      if (!resolved || t.getTime() - resolved.at > RESOLVED_TTL_MS) {
+        const candidates = candidateInitTimes(t);
+        const entry = {
+          at: t.getTime(),
+          initTime: (async () => {
+            for (const init of candidates) {
+              const res = await forecast(init, p);
+              if (res.rows.length > 0) {
+                first = res;
+                return init;
+              }
+              log.warn('weathernext run not published yet — trying the previous cycle', {
+                initTime: init,
+              });
+            }
+            throw new Error(
+              `no WeatherNext long run found (tried ${candidates.join(', ')}) — is the subscription still live?`,
+            );
+          })(),
+        };
+        // A failure is not remembered: the next spot tries again. (An
+        // unpublished run's partition is empty, so retrying it costs 0 bytes.)
+        entry.initTime.catch(() => {
+          if (resolved === entry) resolved = null;
+        });
+        resolved = entry;
       }
-
-      const [job] = await bq.createQueryJob({
-        query: buildQuery(fq, LOOKBACK_HOURS),
-        params: { initTime: initValue, box: boxAround(p.coord), hours: p.hours },
-        types: { initTime: 'TIMESTAMP', box: 'STRING', hours: 'INT64' },
-        maximumBytesBilled: String(maxBytes),
-      });
-      const [rows] = await job.getQueryResults();
-      const bytes = Number(job.metadata?.statistics?.totalBytesProcessed ?? 0);
-
-      log.info('weathernext query', {
-        initTime: initValue,
-        rows: rows.length,
-        megabytesProcessed: Math.round(bytes / 1e5) / 10,
-      });
-
-      return parseRows(rows as Record<string, unknown>[], p.coord, initValue, bytes);
+      const initTime = await resolved.initTime;
+      const res = first ?? (await forecast(initTime, p));
+      return parseRows(res.rows, p.coord, initTime, res.bytes);
     },
   };
 }

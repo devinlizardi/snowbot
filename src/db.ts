@@ -124,6 +124,16 @@ const MIGRATIONS: { readonly name: string; readonly sql: string }[] = [
     CREATE INDEX job_runs_by_job ON job_runs(job, started_at);
     `,
   },
+  {
+    // Test and real share one database. Without this a /watch made while
+    // debugging in test was picked up by the real bot and pinged the real
+    // channel. Rows from before the column existed were all test-era.
+    name: '002-expedition-channel',
+    sql: `
+    ALTER TABLE expeditions ADD COLUMN channel_target TEXT NOT NULL DEFAULT 'test'
+      CHECK (channel_target IN ('test','real'));
+    `,
+  },
 ];
 
 export function openDb(path = process.env.SNOWBOT_DB_PATH ?? './data/snowbot.sqlite'): DB {

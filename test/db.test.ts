@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { kvDelete, kvGet, kvSet, migrate, openDb, type DB } from '../src/db.js';
 
@@ -31,6 +32,25 @@ describe('migrations', () => {
     const v = db.pragma('user_version', { simple: true });
     expect(migrate(db)).toBeGreaterThan(0);
     expect(db.pragma('user_version', { simple: true })).toBe(v);
+  });
+
+  it('adds channel_target to expeditions, treating rows from before it as test', () => {
+    const old = new Database(':memory:');
+    old.pragma('user_version = 0');
+    migrate(old);
+    // Rewind to v1 and drop the column, so 002 runs over a pre-existing row.
+    old.exec(`ALTER TABLE expeditions DROP COLUMN channel_target`);
+    old.pragma('user_version = 1');
+    old.prepare(
+      `INSERT INTO expeditions (id, destination, window_start, window_end, days_total, days_on_snow,
+         plan_json, total_pp_usd, confidence, status)
+       VALUES ('chamonix-1202','chamonix','2026-12-02','2026-12-08',7,5,'{}',2000,'high','watched')`,
+    ).run();
+    migrate(old);
+    expect(old.prepare(`SELECT channel_target FROM expeditions`).get()).toEqual({ channel_target: 'test' });
+    expect(() =>
+      old.prepare(`UPDATE expeditions SET channel_target = 'staging'`).run(),
+    ).toThrow(/CHECK constraint/);
   });
 
   it('refuses to run against a newer schema than it knows', () => {
