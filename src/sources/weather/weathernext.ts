@@ -93,6 +93,28 @@ ${cols}
     ORDER BY f.hours ASC`.replace('@lookbackHours', String(lookbackHours));
 }
 
+/**
+ * The forecast query's job options. `initTime` must be a Date: the Node client
+ * turns a string declared as TIMESTAMP into a parameter with a type and no
+ * value, so the query became `init_time = NULL`, pruned every partition and
+ * returned nothing.
+ */
+export function forecastJobOptions(
+  table: string,
+  lookbackHours: number,
+  initTime: string,
+  coord: Coord,
+  hours: number,
+  maxBytes: number,
+) {
+  return {
+    query: buildQuery(table, lookbackHours),
+    params: { initTime: new Date(initTime), box: boxAround(coord), hours },
+    types: { initTime: 'TIMESTAMP', box: 'STRING', hours: 'INT64' },
+    maximumBytesBilled: String(maxBytes),
+  };
+}
+
 /** The most recent run available, found without scanning history. */
 export function buildInitTimeQuery(table: string, lookbackHours: number): string {
   return `
@@ -130,12 +152,9 @@ export function weathernextSource(cfg: Config): Source<WeatherNextParams, Weathe
         throw new Error(`no WeatherNext run in the last ${LOOKBACK_HOURS}h — is the subscription still live?`);
       }
 
-      const [job] = await bq.createQueryJob({
-        query: buildQuery(fq, LOOKBACK_HOURS),
-        params: { initTime: initValue, box: boxAround(p.coord), hours: p.hours },
-        types: { initTime: 'TIMESTAMP', box: 'STRING', hours: 'INT64' },
-        maximumBytesBilled: String(maxBytes),
-      });
+      const [job] = await bq.createQueryJob(
+        forecastJobOptions(fq, LOOKBACK_HOURS, initValue, p.coord, p.hours, maxBytes),
+      );
       const [rows] = await job.getQueryResults();
       const bytes = Number(job.metadata?.statistics?.totalBytesProcessed ?? 0);
 

@@ -1,8 +1,10 @@
+import { BigQuery } from '@google-cloud/bigquery';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import {
   buildInitTimeQuery,
   buildQuery,
+  forecastJobOptions,
   kelvinToC,
   metresToMm,
   parseRows,
@@ -48,6 +50,26 @@ describe('query construction', () => {
 
   it('bounds the init-time lookup too', () => {
     expect(buildInitTimeQuery(TABLE, 12)).toContain('WHERE init_time >=');
+  });
+});
+
+describe('forecast job options', () => {
+  const opts = forecastJobOptions(TABLE, 12, '2026-10-04T09:00:00.000Z', ASPEN, 360, 1e9);
+
+  it('passes initTime as a Date, keeping the TIMESTAMP type', () => {
+    expect(opts.params.initTime).toBeInstanceOf(Date);
+    expect(opts.params.initTime.toISOString()).toBe('2026-10-04T09:00:00.000Z');
+    expect(opts.types.initTime).toBe('TIMESTAMP');
+  });
+
+  it('gives BigQuery a parameter with a value, not `init_time = NULL`', () => {
+    // What the client actually sends. A string typed TIMESTAMP comes out with
+    // an empty parameterValue — the Oct 4 zero-rows bug.
+    const sent = BigQuery.valueToQueryParameter_(opts.params.initTime, opts.types.initTime);
+    expect(sent.parameterValue?.value).toBe('2026-10-04T09:00:00.000Z');
+    expect(
+      BigQuery.valueToQueryParameter_('2026-10-04T09:00:00.000Z', 'TIMESTAMP').parameterValue?.value,
+    ).toBeUndefined();
   });
 });
 
