@@ -58,7 +58,8 @@ const MAX_CALLOUTS = 3;
 const NOTABLE_SNOW_CM = 5;
 /** km/h. Median daily gust at which lifts start to hold. */
 const WIND_HOLD_KMH = 70;
-const OPEN_METEO_CONCURRENCY = 6;
+/** At 6, a cold snapshot (16 spots × 3–4 models) drew "429: Too many concurrent requests". */
+const OPEN_METEO_CONCURRENCY = 3;
 const BIGQUERY_CONCURRENCY = 4;
 
 const COLS = { name: 13, snow: 7, temp: 9, gust: 5 } as const;
