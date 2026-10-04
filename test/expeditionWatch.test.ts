@@ -5,6 +5,8 @@ import { Poster } from '../src/discord/client.js';
 import type { JobContext } from '../src/jobs/_runner.js';
 import {
   classifyMove,
+  pingText,
+  type Move,
   itinerariesFor,
   renderWatchTable,
   retireIfPast,
@@ -145,12 +147,46 @@ describe('classifyMove', () => {
     ['-9.9% is chatter', 1000, 901, 900, 'flat'],
     ['-10% pings', 1000, 900, 850, 'down'],
     ['+10% pings', 1000, 1100, 900, 'up'],
-    ['small drop under the floor', 610, 595, 600, 'new-floor'],
+    ['small drop 3%+ under the floor', 610, 580, 600, 'new-floor'],
     ['equal to the floor is not new', 610, 600, 600, 'flat'],
+    ['476 → 470 avg (1%) is not a new floor', 480, 470, 476, 'flat'],
+    ['1% under the floor is flat', null, 470, 476, 'flat'],
+    ['4% under the floor is new', null, 456, 476, 'new-floor'],
     ['big drop beats new-floor', 1000, 500, 600, 'down'],
     ['first check vs the dossier quote', 700, 600, null, 'down'],
   ])('%s', (_label, prev, next, floor, expected) => {
     expect(classifyMove(prev, next, floor)).toBe(expected);
+  });
+});
+
+describe('pingText', () => {
+  const moves: Move[] = ['down', 'up', 'new-floor', 'flat'];
+  const text = (move: Move, thread: string | null) =>
+    pingText({ id: 'chamonix-1202', thread_id: thread }, move, 456, move === 'up' ? 410 : 476, 476);
+
+  it('closes every sentence exactly once, with and without a thread', () => {
+    for (const move of moves) {
+      for (const thread of ['thread-1', null]) {
+        const out = text(move, thread);
+        expect(out).not.toMatch(/\.\./);
+        expect(out.endsWith('.')).toBe(true);
+      }
+    }
+  });
+
+  it('reads right for every move', () => {
+    expect(moves.flatMap((m) => [text(m, 'thread-1'), text(m, null)])).toMatchInlineSnapshot(`
+      [
+        "📉 **chamonix-1202** fares down 4% — $456/pp avg (was $476) — details in the thread. New floor.",
+        "📉 **chamonix-1202** fares down 4% — $456/pp avg (was $476). New floor.",
+        "📈 **chamonix-1202** fares up 11% — $456/pp avg (was $410) — details in the thread.",
+        "📈 **chamonix-1202** fares up 11% — $456/pp avg (was $410).",
+        "🔻 **chamonix-1202** new floor — $456/pp avg, the cheapest since we started watching (was $476) — details in the thread.",
+        "🔻 **chamonix-1202** new floor — $456/pp avg, the cheapest since we started watching (was $476).",
+        "**chamonix-1202** — $456/pp avg — details in the thread.",
+        "**chamonix-1202** — $456/pp avg.",
+      ]
+    `);
   });
 });
 
@@ -284,8 +320,11 @@ describe('expeditionWatch', () => {
     setFares(1.01);
     await runExpeditionWatch(ctx(day(3)), deps); // down 3%, still above day 1: chatter
     expect(roots()).toEqual([]);
-    setFares(0.98);
-    await runExpeditionWatch(ctx(day(4)), deps); // down 3% and under every prior check
+    setFares(0.99);
+    await runExpeditionWatch(ctx(day(4)), deps); // 1% under every prior check: not enough
+    expect(roots()).toEqual([]);
+    setFares(0.95);
+    await runExpeditionWatch(ctx(day(5)), deps); // 4% under the floor, small day-over-day
     expect(roots()).toHaveLength(1);
     expect(roots()[0]!.summary).toMatch(/🔻 \*\*niseko-0212\*\* new floor/);
   });
@@ -360,6 +399,21 @@ describe('expeditionWatch', () => {
     const thread = posts().filter((p) => p.kind === 'thread');
     expect(thread).toHaveLength(1);
     expect(roots()).toEqual([]); // three-of-five averages are not news against a five-person quote
+  });
+
+  it('makes no root ping when the thread reply is suppressed', async () => {
+    db.prepare(`UPDATE expeditions SET thread_id = NULL`).run();
+    class NoThread extends Poster {
+      override async postThread() {
+        return { messageId: null, suppressed: true, reason: 'no thread to post into' };
+      }
+    }
+    const c = ctx(day(1));
+    c.poster = new NoThread(cfg, db, { dryRun: true, target: 'test', job: 'expeditionWatch' });
+    await runExpeditionWatch(c, deps);
+    setFares(0.8);
+    await runExpeditionWatch({ ...c, now: new Date(day(2)) }, deps);
+    expect(roots()).toEqual([]);
   });
 
   it("leaves the other channel's expeditions alone", async () => {
