@@ -425,6 +425,8 @@ function snapshot(opts: CommandOpts): CommandResult {
 function build(opts: CommandOpts, ctx: CommandContext): CommandResult {
   const destination = str(opts, 'destination')?.toLowerCase() || undefined;
   const month = str(opts, 'month') || undefined;
+  const excluded = destination ? ctx.cfg.excluded.find((x) => x.id === destination) : undefined;
+  if (excluded) return oops(`${excluded.id} is off the board on purpose: ${excluded.reason}.`);
   if (destination && !ctx.cfg.board.some((d) => d.id === destination)) {
     const ids = ctx.cfg.board.map((d) => d.id).join(', ');
     return oops(`"${destination}" isn't on the board. Try one of: ${ids}.`);

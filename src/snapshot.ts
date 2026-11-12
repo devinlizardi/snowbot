@@ -1,4 +1,4 @@
-import type { Config, Destination } from './config.js';
+import { DISPLAY_GROUPS, type Config, type Destination, type DisplayGroup } from './config.js';
 import { optionalSecret } from './config.js';
 import type { DB } from './db.js';
 import type { Logger } from './logger.js';
@@ -39,7 +39,7 @@ import {
  *   gatherSnapshot   the only I/O: every source through `cached()`, with the
  *                    params the builder and Aspen update already use, so their
  *                    cache rows are shared
- *   composeSnapshot  pure: numbers, cells, regions, callouts
+ *   composeSnapshot  pure: numbers, cells, display groups, callouts
  *   renderSnapshot   pure: the Discord message, ≤2,000 chars, a 36-column
  *                    code block that doesn't scroll sideways on a phone
  *
@@ -64,29 +64,23 @@ const BIGQUERY_CONCURRENCY = 4;
 
 const COLS = { name: 13, snow: 7, temp: 9, gust: 5 } as const;
 const GLYPH: Record<Agreement, string> = { agree: '●', partly: '◐', split: '○' };
-const REGION_TITLE: Record<Region, string> = {
-  JP: 'JAPAN',
-  CA: 'CANADA',
-  US: 'USA',
-  EU: 'EUROPE',
-};
-/** Board names are long ("Fernie Alpine Resort"); the table has 11 columns. */
+/** Board names are long ("Big Bear (Snow Summit)"); the table has 11 columns. */
 const SHORT_NAMES: Record<string, string> = {
-  niseko: 'Niseko',
-  rusutsu: 'Rusutsu',
-  hakuba: 'Hakuba',
-  nozawa: 'Nozawa',
-  whistler: 'Whistler',
-  revelstoke: 'Revelstoke',
-  banff: 'Banff/LL',
-  fernie: 'Fernie',
-  jackson: 'Jackson',
-  'big-sky': 'Big Sky',
-  'alta-snowbird': 'Snowbird',
+  'big-bear': 'Big Bear',
+  mammoth: 'Mammoth',
   palisades: 'Palisades',
+  killington: 'Killington',
+  stratton: 'Stratton',
+  sugarbush: 'Sugarbush',
+  'winter-park': 'Winter Park',
+  steamboat: 'Steamboat',
+  solitude: 'Solitude',
+  snowbird: 'Snowbird',
+  'big-sky': 'Big Sky',
+  niseko: 'Niseko',
+  banff: 'Banff/LL',
   chamonix: 'Chamonix',
   zermatt: 'Zermatt',
-  'st-anton': 'St. Anton',
 };
 
 /* ---------------------------------------------------------------- types */
@@ -95,8 +89,8 @@ export type Spot = {
   id: string;
   /** What the table and callouts call it; ≤11 characters. */
   label: string;
-  /** 'ASPEN' sits above the regions as its own row. */
-  group: 'ASPEN' | Region;
+  /** 'ASPEN' sits above the display groups as its own row. */
+  group: 'ASPEN' | DisplayGroup;
   /** Which regional cross-check models cover it. */
   region: Region;
   base: Coord;
@@ -140,7 +134,7 @@ export type Snapshot = {
   timezone: string;
   aspenLabel: string;
   spots: SpotSnapshot[];
-  regions: { region: Region; pattern: string }[];
+  groups: { group: DisplayGroup; pattern: string }[];
   callouts: string[];
   /** Display names of every source that contributed, in a stable order. */
   sources: string[];
@@ -178,7 +172,7 @@ function boardSpot(d: Destination): Spot {
   return {
     id: d.id,
     label: short.length > 11 ? short.slice(0, 10) + '…' : short,
-    group: d.region,
+    group: d.group,
     region: d.region,
     base: { lat: d.lat, lon: d.lon, label: 'base', elevationM: d.base_elevation_m },
     baseElevationM: d.base_elevation_m,
@@ -294,10 +288,10 @@ export async function gatherSnapshot(
 export function composeSnapshot(inputs: SnapshotInputs): Snapshot {
   const spots = inputs.spots.map((s) => composeSpot(s, inputs.now));
 
-  const regions: Snapshot['regions'] = [];
-  for (const region of ['JP', 'CA', 'US', 'EU'] as const) {
-    const rows = spots.filter((s) => s.spot.group === region);
-    if (rows.length) regions.push({ region, pattern: regionPattern(rows) });
+  const groups: Snapshot['groups'] = [];
+  for (const group of DISPLAY_GROUPS) {
+    const rows = spots.filter((s) => s.spot.group === group);
+    if (rows.length) groups.push({ group, pattern: groupPattern(rows) });
   }
 
   const contributing = new Set<string>();
@@ -319,7 +313,7 @@ export function composeSnapshot(inputs: SnapshotInputs): Snapshot {
     timezone: inputs.timezone,
     aspenLabel: aspenLabel(inputs.now, inputs.timezone, inputs.aspenWindow),
     spots,
-    regions,
+    groups,
     callouts: pickCallouts(spots),
     sources: SOURCE_ORDER.filter((m) => contributing.has(m)).map(modelName),
     missing: [...missing].map(([source, spots]) => ({ source, spots })),
@@ -406,8 +400,8 @@ function worst(xs: (Agreement | null)[]): Agreement | null {
   return known.reduce((a, b) => (RANK[b] > RANK[a] ? b : a));
 }
 
-/** A few words for a region, from a fixed vocabulary — never free text. */
-export function regionPattern(rows: readonly SpotSnapshot[]): string {
+/** A few words for a display group, from a fixed vocabulary — never free text. */
+export function groupPattern(rows: readonly SpotSnapshot[]): string {
   const live = rows.filter((r) => r.conditions !== null);
   if (!live.length) return 'no data';
   const half = live.length / 2;
@@ -578,9 +572,9 @@ export function renderTable(s: Snapshot): string {
   );
   const aspen = s.spots.find((r) => r.spot.group === 'ASPEN');
   if (aspen) lines.push(row(s.aspenLabel, aspen));
-  for (const { region, pattern } of s.regions) {
-    lines.push(clip(`${REGION_TITLE[region]} · ${pattern}`));
-    for (const r of s.spots.filter((x) => x.spot.group === region)) {
+  for (const { group, pattern } of s.groups) {
+    lines.push(clip(`${group} · ${pattern}`));
+    for (const r of s.spots.filter((x) => x.spot.group === group)) {
       lines.push(row(` ${r.spot.label}`, r));
     }
   }

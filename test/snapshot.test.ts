@@ -19,6 +19,7 @@ import {
   type Spot,
 } from '../src/snapshot.js';
 import type { Fetched, Source } from '../src/sources/types.js';
+import { crosscheckFor } from '../src/sources/weather/crosscheck.js';
 import type { DailyWeather, ModelForecast, Coord } from '../src/sources/weather/types.js';
 import type { WeatherNextForecast } from '../src/sources/weather/weathernext.js';
 
@@ -99,9 +100,9 @@ function wetWeathernext(coord: Coord): WeatherNextForecast {
   };
 }
 
-/** The week in the README mock: a split at Revelstoke, real snow at Banff, a dip at Zermatt. */
+/** The week in the README mock: a split at Snowbird, real snow at Banff, a dip at Zermatt. */
 const SCENARIO: Scenario = {
-  revelstoke: {
+  snowbird: {
     ecmwf_ifs025: (i) => ({ snowfallCm: i === 4 ? 2 : 0, precipitationMm: i === 4 ? 2 : 0 }),
     ecmwf_aifs025: (i) => ({ snowfallCm: i === 4 ? 3 : 0, precipitationMm: i === 4 ? 3 : 0 }),
     ncep_nam_conus: (i) => ({ snowfallCm: i === 4 ? 6 : 0, precipitationMm: i === 4 ? 5 : 0 }),
@@ -128,7 +129,7 @@ const SCENARIO: Scenario = {
       (i: number) => (i === 6 ? { precipitationMm: 9, freezingLevelM: 2300 } : {}),
     ]),
   ),
-  whistler: Object.fromEntries(
+  'big-bear': Object.fromEntries(
     (['ecmwf_ifs025', 'ecmwf_aifs025', 'ncep_nam_conus', 'gfs_seamless'] as const).map((m) => [
       m,
       (i: number) => (i === 3 ? { precipitationMm: 8, freezingLevelM: 2500 } : {}),
@@ -193,6 +194,20 @@ describe('snapshotSpots', () => {
     expect(spots.slice(1).map((s) => s.id)).toEqual(cfg.board.map((d) => d.id));
     for (const s of spots) expect(s.label.length).toBeLessThanOrEqual(11);
   });
+
+  it('groups by display group but keeps model selection on geography', () => {
+    const niseko = spots.find((s) => s.id === 'niseko')!;
+    const chamonix = spots.find((s) => s.id === 'chamonix')!;
+    expect(niseko.group).toBe(chamonix.group);
+    expect(crosscheckFor(niseko.region).map((x) => x.name)).toEqual([
+      'open-meteo:icon_global',
+      'open-meteo:gfs_seamless',
+    ]);
+    expect(crosscheckFor(chamonix.region).map((x) => x.name)).toEqual([
+      'open-meteo:icon_eu',
+      'open-meteo:gfs_seamless',
+    ]);
+  });
 });
 
 /* ---------------------------------------------------------------- render */
@@ -204,18 +219,18 @@ describe('the message', () => {
     for (const line of block(text)) expect([...line].length).toBeLessThanOrEqual(BLOCK_MAX_COLS);
   });
 
-  it('puts Aspen first with its countdown, then the regions in board order', async () => {
+  it('puts Aspen first with its countdown, then the display groups in order', async () => {
     const { text } = await snapshotFor(SCENARIO);
     const lines = block(text);
     expect(lines[1]).toMatch(/^ASPEN · 114d\s+dry\s+2\/14\s+30 ●$/);
     const headers = lines.filter((l) => /^[A-Z]{3,} · /.test(l) && !l.startsWith('ASPEN'));
-    expect(headers.map((h) => h.split(' · ')[0])).toEqual(['JAPAN', 'CANADA', 'USA', 'EUROPE']);
+    expect(headers.map((h) => h.split(' · ')[0])).toEqual(['WEST', 'EAST', 'ROCKIES', 'ABROAD']);
   });
 
   it('shows snow as the range across the models, and the split as a callout naming them', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(rowFor(text, 'Revelstoke')).toMatch(/2–14cm .* ○$/);
-    expect(text).toContain('⚠️ **Revelstoke is a coin flip** — GFS 14cm, ECMWF 2cm.');
+    expect(rowFor(text, 'Snowbird')).toMatch(/2–14cm .* ○$/);
+    expect(text).toContain('⚠️ **Snowbird is a coin flip** — GFS 14cm, ECMWF 2cm.');
   });
 
   it('calls out the most snow the models agree on', async () => {
@@ -234,14 +249,14 @@ describe('the message', () => {
 
   it('says rain where it rains, and dry where nothing falls however warm', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(rowFor(text, 'Whistler')).toMatch(/^ Whistler\s+rain\s/);
+    expect(rowFor(text, 'Big Bear')).toMatch(/^ Big Bear\s+rain\s/);
     expect(rowFor(text, 'Niseko')).toMatch(/^ Niseko\s+dry\s/);
   });
 
-  it('labels regions from the fixed vocabulary', async () => {
+  it('labels display groups from the fixed vocabulary', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(block(text)).toContain('JAPAN · dry, mild');
-    expect(block(text)).toContain('CANADA · snowing, mild');
+    expect(block(text)).toContain('EAST · dry, mild');
+    expect(block(text)).toContain('ROCKIES · snow in spots, mild');
   });
 
   it('ends with the legend, the sources that answered, and when', async () => {
@@ -286,10 +301,10 @@ describe('when sources fail', () => {
 
   it('prints a dash row for a spot nothing answered for', async () => {
     const all = ['ecmwf_ifs025', 'ecmwf_aifs025', 'icon_global', 'gfs_seamless'].map(
-      (m) => `open-meteo:${m}@hakuba`,
+      (m) => `open-meteo:${m}@niseko`,
     );
     const { text } = await snapshotFor(SCENARIO, { fail: all });
-    expect(rowFor(text, 'Hakuba')).toMatch(/^ Hakuba\s+—\s+—\s+—$/);
+    expect(rowFor(text, 'Niseko')).toMatch(/^ Niseko\s+—\s+—\s+—$/);
     expect(text.split('\n')[0]).toContain('15 spots');
   });
 
@@ -387,7 +402,7 @@ describe('pickCallouts', () => {
 
   it('flags lift-holding wind', async () => {
     const windy: Scenario = {
-      jackson: Object.fromEntries(
+      'big-sky': Object.fromEntries(
         ['ecmwf_ifs025', 'ecmwf_aifs025', 'ncep_nam_conus', 'gfs_seamless'].map((m) => [
           m,
           (i: number) => (i === 3 ? { gustMaxKmh: 85 } : {}),
@@ -396,19 +411,19 @@ describe('pickCallouts', () => {
     };
     const { snapshot } = await snapshotFor(windy);
     expect(pickCallouts(snapshot.spots)).toEqual([
-      '💨 **Jackson gusts to 85 km/h Sun** — lift-hold territory.',
+      '💨 **Big Sky gusts to 85 km/h Sun** — lift-hold territory.',
     ]);
   });
 
   it('keeps at most three, most useful first', async () => {
     const busy: Scenario = {
       ...SCENARIO,
-      jackson: { gfs_seamless: (i) => (i === 3 ? { gustMaxKmh: 99 } : {}) },
+      'big-sky': { gfs_seamless: (i) => (i === 3 ? { gustMaxKmh: 99 } : {}) },
     };
     const { snapshot } = await snapshotFor(busy);
     const c = pickCallouts(snapshot.spots);
     expect(c).toHaveLength(3);
-    expect(c[0]).toMatch(/^⚠️ \*\*Revelstoke/);
+    expect(c[0]).toMatch(/^⚠️ \*\*Snowbird/);
     expect(c[1]).toMatch(/^❄️ \*\*Most snow/);
     expect(c[2]).toMatch(/^🏔️ \*\*Snow up high/);
   });

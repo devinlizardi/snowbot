@@ -35,10 +35,21 @@ const QuoteSchema = z.object({
   translation: z.enum(['ours']).optional(),
 });
 
+/**
+ * How the board is grouped for people: who can drive, who has to fly. Distinct
+ * from `region`, which is geography and picks the cross-check models — Niseko
+ * and Chamonix share ABROAD but need different models.
+ */
+export const DISPLAY_GROUPS = ['WEST', 'EAST', 'ROCKIES', 'ABROAD'] as const;
+export type DisplayGroup = (typeof DISPLAY_GROUPS)[number];
+
 const DestinationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  /** Geography: picks the regional cross-check models and the airfare prior. */
   region: z.enum(['JP', 'CA', 'US', 'EU']),
+  /** People: the display group in /snapshot and /build. */
+  group: z.enum(DISPLAY_GROUPS),
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   base_elevation_m: z.number().int(),
@@ -174,7 +185,15 @@ const ConfigSchema = z
       }),
     }),
 
+    /** The pass the group rides on. Pass facts still only come from the live lookup. */
+    group: z
+      .object({ pass: z.enum(['ikon_base', 'ikon', 'none']).default('ikon_base') })
+      .default({ pass: 'ikon_base' }),
+
     board: z.array(DestinationSchema).min(1),
+
+    /** Spots deliberately left off the board, with the reason, so future-you knows why. */
+    excluded: z.array(z.object({ id: z.string().min(1), reason: z.string().min(1) })).default([]),
   })
   .superRefine((cfg, ctx) => {
     const w = cfg.expedition.ranking_weights;
@@ -193,6 +212,15 @@ const ConfigSchema = z
     for (const d of cfg.board) {
       if (d.min_days > d.ideal_days) {
         ctx.addIssue({ code: 'custom', path: ['board', d.id], message: `min_days > ideal_days for ${d.id}` });
+      }
+    }
+    for (const x of cfg.excluded) {
+      if (ids.includes(x.id)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['excluded', x.id],
+          message: `${x.id} is excluded (${x.reason}) but is also on the board`,
+        });
       }
     }
     if (cfg.aspen.window_end < cfg.aspen.window_start) {

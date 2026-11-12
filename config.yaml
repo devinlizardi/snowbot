@@ -154,6 +154,12 @@ expedition:
     cost: 0.20
     logistics_ease: 0.15
 
+# Which pass the group rides on. Decides which board entries make sense and
+# what passCheck compares a trip against; the pass facts themselves (days,
+# blackouts) only ever come from the live lookup, never from this file.
+group:
+  pass: ikon_base # ikon_base | ikon | none
+
 # Destination board.
 # Coordinates are approximate resort-base positions and are flagged for
 # verification in Packet 2. `pass_verify: true` means the IKON/blackout answer
@@ -173,9 +179,215 @@ expedition:
 #             translated ourselves (published translations are usually
 #             copyrighted). Destinations without one draw from quote_pool.
 board:
+  # ── WEST · drivable for the California three ──
+  - id: big-bear
+    name: Big Bear (Snow Summit)
+    region: US
+    group: WEST
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts. Snow Summit; Bear Mountain tops out higher.
+    lat: 34.2286
+    lon: -116.8911
+    base_elevation_m: 2123
+    summit_elevation_m: 2491
+    airport: ONT
+    ground: Drive from LA/OC (~2h); rental car from ONT
+    lodging_band_usd_pp_night: [70, 130]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+  - id: mammoth
+    name: Mammoth Mountain
+    region: US
+    group: WEST
+    # Main Lodge point and base are ESTIMATES (the infobox point is the summit, its 2,424 m base is Eagle Lodge); summit from the infobox. Verify before trusting.
+    lat: 37.6514
+    lon: -119.0266
+    base_elevation_m: 2700
+    summit_elevation_m: 3369
+    airport: MMH
+    ground: Drive from LA (~5h); short shuttle from MMH
+    lodging_band_usd_pp_night: [90, 160]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+  - id: palisades
+    name: Palisades Tahoe
+    region: US
+    group: WEST
+    lat: 39.1967
+    lon: -120.2356
+    base_elevation_m: 1890
+    summit_elevation_m: 2760
+    airport: RNO
+    ground: Rental car RNO -> Olympic Valley (~1h)
+    lodging_band_usd_pp_night: [110, 180]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+    pitch:
+      hook: "Tahoe's big-mountain classic — KT-22, lake views, and an easy flight for the West Coast half."
+      terrain:
+        - "KT-22 and the Palisades cliffs"
+        - "Palisades and Alpine linked by gondola"
+        - "The 1960 Olympics venue"
+      off_snow:
+        - "Lake Tahoe views"
+        - "Downtown Truckee"
+        - "Reno within an hour"
+      heads_up:
+        - "Sierra snow is heavy, and big storms can close the roads"
+      quote:
+        text: "I thought it must surely be the fairest picture the whole earth affords."
+        by: "Mark Twain"
+        source: "on Lake Tahoe, Roughing It (1872)"
+  # ── EAST · drivable from New York ──
+  - id: killington
+    name: Killington-Pico
+    region: US
+    group: EAST
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts. Base is the Skyeship base, the lowest; the point may sit nearer K-1.
+    lat: 43.626
+    lon: -72.798
+    base_elevation_m: 355
+    summit_elevation_m: 1293
+    airport: ALB
+    ground: Drive from NYC (~4.5h); rental car from ALB
+    lodging_band_usd_pp_night: [80, 140]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+  - id: stratton
+    name: Stratton
+    region: US
+    group: EAST
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts.
+    lat: 43.1142
+    lon: -72.9067
+    base_elevation_m: 571
+    summit_elevation_m: 1181
+    airport: ALB
+    ground: Drive from NYC (~4h); rental car from ALB
+    lodging_band_usd_pp_night: [90, 160]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+  - id: sugarbush
+    name: Sugarbush
+    region: US
+    group: EAST
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts. Lincoln Peak.
+    lat: 44.1351
+    lon: -72.886
+    base_elevation_m: 452
+    summit_elevation_m: 1244
+    airport: BTV
+    ground: Drive from NYC (~5h); rental car from BTV (~1h)
+    lodging_band_usd_pp_night: [80, 140]
+    min_days: 2
+    ideal_days: 3
+    pass_verify: true
+  # ── ROCKIES · everyone flies ──
+  - id: winter-park
+    name: Winter Park
+    region: US
+    group: ROCKIES
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts.
+    lat: 39.8869
+    lon: -105.7625
+    base_elevation_m: 2743
+    summit_elevation_m: 3676
+    airport: DEN
+    ground: Shuttle or rental car DEN -> Winter Park (~2h)
+    lodging_band_usd_pp_night: [100, 170]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+  - id: steamboat
+    name: Steamboat
+    region: US
+    group: ROCKIES
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts.
+    lat: 40.459
+    lon: -106.803
+    base_elevation_m: 2103
+    summit_elevation_m: 3221
+    airport: HDN
+    ground: Shuttle HDN -> Steamboat (~30 min)
+    lodging_band_usd_pp_night: [110, 180]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+  - id: solitude
+    name: Solitude
+    region: US
+    group: ROCKIES
+    # Wikipedia infobox, Nov 2026; not yet run through scripts/verify-board.ts.
+    lat: 40.6151
+    lon: -111.5889
+    base_elevation_m: 2435
+    summit_elevation_m: 3197
+    airport: SLC
+    ground: Rental car SLC -> Big Cottonwood (~45 min)
+    lodging_band_usd_pp_night: [110, 180]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+  - id: snowbird
+    name: Snowbird
+    region: US
+    group: ROCKIES
+    # Wikipedia infobox, Nov 2026 (main base area); not yet run through scripts/verify-board.ts.
+    lat: 40.5811
+    lon: -111.6564
+    base_elevation_m: 2469
+    summit_elevation_m: 3353
+    airport: SLC
+    ground: Canyon shuttle SLC -> LCC
+    lodging_band_usd_pp_night: [120, 190]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+    pitch:
+      hook: "Little Cottonwood Canyon's famous Utah powder, under an hour from the airport."
+      terrain:
+        - "Snowbird's tram and steep, long fall-line runs"
+        - "Mineral Basin on the back side"
+      off_snow:
+        - "The Cliff Lodge spa at Snowbird"
+        - "Salt Lake City breweries down the canyon"
+      heads_up:
+        - "Alta is skiers-only — this trip is Snowbird"
+        - "The canyon road can close for avalanche control on big storm days"
+  - id: big-sky
+    name: Big Sky
+    region: US
+    group: ROCKIES
+    lat: 45.2861
+    lon: -111.4014
+    base_elevation_m: 2286
+    summit_elevation_m: 3403
+    airport: BZN
+    ground: Shuttle BZN -> Big Sky
+    lodging_band_usd_pp_night: [130, 200]
+    min_days: 3
+    ideal_days: 5
+    pass_verify: true
+    pitch:
+      hook: "A huge, empty mountain — Lone Peak's tram and almost no lift lines."
+      terrain:
+        - "The Lone Peak tram to the summit"
+        - "One of the biggest ski areas in the US"
+        - "Uncrowded, even on weekends"
+      off_snow:
+        - "Yellowstone next door — a snowcoach day on a rest day"
+        - "Easygoing Montana town"
+      heads_up:
+        - "Remote — Bozeman, then an hour's shuttle"
+  # ── ABROAD · aspirational ──
   - id: niseko
     name: Niseko United
     region: JP
+    group: ABROAD
     lat: 42.8639
     lon: 140.6875
     base_elevation_m: 255
@@ -204,136 +416,10 @@ board:
         source: "haiku"
         original: "いざ行かむ雪見にころぶ所まで"
         translation: "ours"
-  - id: rusutsu
-    name: Rusutsu
-    region: JP
-    lat: 42.7333
-    lon: 140.9083
-    base_elevation_m: 400
-    summit_elevation_m: 994
-    airport: CTS
-    ground: Bus CTS -> Rusutsu
-    lodging_band_usd_pp_night: [100, 150]
-    min_days: 8
-    ideal_days: 10
-    pass_verify: true
-    pitch:
-      hook: "Hokkaido snow without the Niseko crowds — three mountains of glades and empty weekday groomers."
-      terrain:
-        - "Three peaks (East, West, Mt. Isola) linked by gondola"
-        - "Some of the best tree riding in Hokkaido"
-        - "Wide-open groomers with no lift lines"
-      off_snow:
-        - "Lake Tōya's hot-spring town is a short drive"
-        - "An easy day trip over to Niseko"
-      heads_up:
-        - "The village is basically the resort — nights are quiet"
-  - id: hakuba
-    name: Hakuba Valley
-    region: JP
-    lat: 36.6983
-    lon: 137.8361
-    base_elevation_m: 760
-    summit_elevation_m: 1831
-    airport: HND
-    ground: Bus/train HND -> Hakuba
-    lodging_band_usd_pp_night: [90, 140]
-    min_days: 8
-    ideal_days: 10
-    pass_verify: true
-    pitch:
-      hook: "The 1998 Olympic valley — ten resorts, real alpine terrain, and Japanese powder a train ride from Tokyo."
-      terrain:
-        - "Ten resorts in one valley: Happo-one, Cortina, Goryu and more"
-        - "Above-treeline bowls at Happo-one"
-        - "Cortina's trees are the storm-day move"
-      off_snow:
-        - "Onsen all over the valley"
-        - "Izakaya and sake in Echoland and Happo village"
-        - "Snow monkeys at Jigokudani as a rest-day trip"
-      heads_up:
-        - "Resorts are spread out — the valley shuttle or a car matters"
-  - id: nozawa
-    name: Nozawa Onsen
-    region: JP
-    lat: 36.9219
-    lon: 138.4436
-    base_elevation_m: 565
-    summit_elevation_m: 1650
-    airport: HND
-    ground: Shinkansen to Iiyama + bus
-    lodging_band_usd_pp_night: [90, 140]
-    min_days: 8
-    ideal_days: 10
-    pass_verify: true
-    pitch:
-      hook: "A centuries-old hot-spring village with a big mountain on its doorstep — the most Japanese trip on the board."
-      terrain:
-        - "One big mountain with over 1,000m of vertical"
-        - "Tree runs and powder stashes off the upper mountain"
-      off_snow:
-        - "Thirteen free public bathhouses in the village — an onsen crawl after riding"
-        - "Cobbled lanes, izakaya and local nozawana pickles"
-        - "The Dosojin fire festival every January 15"
-      heads_up:
-        - "Shinkansen then a bus from Tokyo — easy, but a transfer"
-      quote:
-        text: "So this is it — my home at last? Five feet of snow."
-        by: "Kobayashi Issa"
-        source: "1812, coming home to Kashiwabara in the Shinano snow country, a few valleys from Nozawa"
-        original: "是がまあつひの栖か雪五尺"
-        translation: "ours"
-  - id: whistler
-    name: Whistler Blackcomb
-    region: CA
-    lat: 50.1163
-    lon: -122.9574
-    base_elevation_m: 675
-    summit_elevation_m: 2182
-    airport: YVR
-    ground: Skylynx coach YVR -> Whistler
-    lodging_band_usd_pp_night: [120, 190]
-    min_days: 5
-    ideal_days: 7
-    pass_verify: true
-    pitch:
-      hook: "North America's biggest resort — two whole mountains and a real village, a short hop for the West Coast crew."
-      terrain:
-        - "Whistler and Blackcomb joined by the Peak 2 Peak gondola"
-        - "Alpine bowls and glaciers up top, trees below"
-        - "Serious terrain parks"
-      off_snow:
-        - "The best après in North America, starting at the base"
-        - "Scandinave Spa for a rest day"
-      heads_up:
-        - "Coastal snow — mild spells can rain at the base; ride high"
-  - id: revelstoke
-    name: Revelstoke
-    region: CA
-    lat: 50.9583
-    lon: -118.1637
-    base_elevation_m: 512
-    summit_elevation_m: 2225
-    airport: YLW
-    ground: Rental car YLW -> Revelstoke (~2.5h)
-    lodging_band_usd_pp_night: [100, 160]
-    min_days: 5
-    ideal_days: 7
-    pass_verify: true
-    pitch:
-      hook: "The biggest lift-served vertical in North America, in a real mountain town instead of a resort village."
-      terrain:
-        - "About 1,700m of vertical top to bottom"
-        - "Deep, steep trees and big alpine bowls"
-        - "Cat and heli operators in town for anyone who wants to splurge"
-      off_snow:
-        - "Downtown Revelstoke's breweries and diners"
-        - "A low-key locals' town, no mega-village"
-      heads_up:
-        - "A 2.5h winter drive from Kelowna — someone drives"
   - id: banff
     name: Banff / Lake Louise
     region: CA
+    group: ABROAD
     lat: 51.4419
     lon: -116.1553
     base_elevation_m: 1645
@@ -360,138 +446,10 @@ board:
         text: "Since we can't export the scenery, we'll have to import the tourists."
         by: "William Cornelius Van Horne"
         source: "president of the Canadian Pacific Railway, which built the Banff Springs Hotel"
-  - id: fernie
-    name: Fernie Alpine Resort
-    region: CA
-    lat: 49.4627
-    lon: -115.0872
-    base_elevation_m: 1082
-    summit_elevation_m: 1925
-    airport: YYC
-    ground: Rental car YYC -> Fernie (~3h)
-    lodging_band_usd_pp_night: [90, 140]
-    min_days: 5
-    ideal_days: 7
-    pass_verify: true
-    pitch:
-      hook: "Five bowls of deep Rockies powder and an old mining town that still feels like a secret."
-      terrain:
-        - "Five alpine bowls"
-        - "Some of the deepest snow in the Canadian Rockies"
-      off_snow:
-        - "Historic downtown Fernie's bars and restaurants"
-        - "Small-town, no-crowds vibe"
-      heads_up:
-        - "About 3h by car from Calgary"
-  - id: jackson
-    name: Jackson Hole
-    region: US
-    lat: 43.5875
-    lon: -110.8279
-    base_elevation_m: 1924
-    summit_elevation_m: 3185
-    airport: JAC
-    ground: Shuttle JAC -> Teton Village
-    lodging_band_usd_pp_night: [140, 220]
-    min_days: 4
-    ideal_days: 6
-    pass_verify: true
-    pitch:
-      hook: "The most legendary steeps in the US — Corbet's Couloir is right there, and the tram takes you to it."
-      terrain:
-        - "The aerial tram to the summit"
-        - "Corbet's Couloir and endless steep chutes"
-        - "Over 1,200m of continuous vertical"
-      off_snow:
-        - "Saddle barstools at the Million Dollar Cowboy Bar"
-        - "Mangy Moose at the base"
-        - "Grand Teton views all day"
-      heads_up:
-        - "An expert-heavy mountain; Teton Village lodging runs pricey"
-      quote:
-        text: "Someday someone will ski that."
-        by: "Barry Corbet"
-        source: "looking up at the couloir that now carries his name, 1960"
-  - id: big-sky
-    name: Big Sky
-    region: US
-    lat: 45.2861
-    lon: -111.4014
-    base_elevation_m: 2286
-    summit_elevation_m: 3403
-    airport: BZN
-    ground: Shuttle BZN -> Big Sky
-    lodging_band_usd_pp_night: [130, 200]
-    min_days: 4
-    ideal_days: 6
-    pass_verify: true
-    pitch:
-      hook: "A huge, empty mountain — Lone Peak's tram and almost no lift lines."
-      terrain:
-        - "The Lone Peak tram to the summit"
-        - "One of the biggest ski areas in the US"
-        - "Uncrowded, even on weekends"
-      off_snow:
-        - "Yellowstone next door — a snowcoach day on a rest day"
-        - "Easygoing Montana town"
-      heads_up:
-        - "Remote — Bozeman, then an hour's shuttle"
-  - id: alta-snowbird
-    name: Alta / Snowbird
-    region: US
-    lat: 40.5883
-    lon: -111.6383
-    base_elevation_m: 2600
-    summit_elevation_m: 3353
-    airport: SLC
-    ground: Canyon shuttle SLC -> LCC
-    lodging_band_usd_pp_night: [120, 190]
-    min_days: 4
-    ideal_days: 6
-    pass_verify: true
-    pitch:
-      hook: "Little Cottonwood Canyon's famous Utah powder, under an hour from the airport."
-      terrain:
-        - "Snowbird's tram and steep, long fall-line runs"
-        - "Mineral Basin on the back side"
-      off_snow:
-        - "The Cliff Lodge spa at Snowbird"
-        - "Salt Lake City breweries down the canyon"
-      heads_up:
-        - "Alta is skiers-only — this trip is Snowbird"
-        - "The canyon road can close for avalanche control on big storm days"
-  - id: palisades
-    name: Palisades Tahoe
-    region: US
-    lat: 39.1967
-    lon: -120.2356
-    base_elevation_m: 1890
-    summit_elevation_m: 2760
-    airport: RNO
-    ground: Rental car RNO -> Olympic Valley (~1h)
-    lodging_band_usd_pp_night: [110, 180]
-    min_days: 3
-    ideal_days: 5
-    pass_verify: true
-    pitch:
-      hook: "Tahoe's big-mountain classic — KT-22, lake views, and an easy flight for the West Coast half."
-      terrain:
-        - "KT-22 and the Palisades cliffs"
-        - "Palisades and Alpine linked by gondola"
-        - "The 1960 Olympics venue"
-      off_snow:
-        - "Lake Tahoe views"
-        - "Downtown Truckee"
-        - "Reno within an hour"
-      heads_up:
-        - "Sierra snow is heavy, and big storms can close the roads"
-      quote:
-        text: "I thought it must surely be the fairest picture the whole earth affords."
-        by: "Mark Twain"
-        source: "on Lake Tahoe, Roughing It (1872)"
   - id: chamonix
     name: Chamonix
     region: EU
+    group: ABROAD
     lat: 45.9237
     lon: 6.8694
     base_elevation_m: 1035
@@ -522,6 +480,7 @@ board:
   - id: zermatt
     name: Zermatt
     region: EU
+    group: ABROAD
     lat: 46.0207
     lon: 7.7491
     base_elevation_m: 1620
@@ -547,26 +506,9 @@ board:
         text: "Climb if you will, but remember that courage and strength are nought without prudence, and that a momentary negligence may destroy the happiness of a lifetime."
         by: "Edward Whymper"
         source: "first to summit the Matterhorn, Scrambles Amongst the Alps (1871)"
-  - id: st-anton
-    name: St. Anton am Arlberg
-    region: EU
-    lat: 47.1287
-    lon: 10.2683
-    base_elevation_m: 1304
-    summit_elevation_m: 2811
-    airport: ZRH
-    ground: Train ZRH -> St. Anton
-    lodging_band_usd_pp_night: [120, 190]
-    min_days: 7
-    ideal_days: 9
-    pass_verify: true
-    pitch:
-      hook: "The après capital of the Alps, with the terrain to back it up."
-      terrain:
-        - "The huge linked Ski Arlberg area"
-        - "Legendary off-piste"
-      off_snow:
-        - "MooserWirt and Krazy Kanguruh après"
-        - "Austrian hut food"
-      heads_up:
-        - "Big off-piste reputation — respect the avalanche conditions"
+
+# Spots deliberately off the board, with why. Validation refuses an id that
+# is both here and on the board, and nothing ever surfaces an excluded spot.
+excluded:
+  - id: revelstoke
+    reason: "the group went in 25/26"

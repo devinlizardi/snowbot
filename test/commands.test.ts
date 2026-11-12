@@ -292,6 +292,12 @@ describe('/build', () => {
     expect(badMonth.action).toBeUndefined();
     expect(badMonth.reply).toMatch(/YYYY-MM/);
   });
+
+  it('says why an excluded spot is off the board', async () => {
+    const r = await handle('build', null, { destination: 'revelstoke' }, m1());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/revelstoke is off the board on purpose: the group went/);
+  });
 });
 
 describe('/trip', () => {
