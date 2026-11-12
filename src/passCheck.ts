@@ -28,6 +28,8 @@ export function passCheck(
   window: TripWindow,
   access: PassAccess | null,
   pass: PassName | 'none' = 'ikon_base',
+  /** False when the window isn't a trip (a /snapshot week): blackouts only. */
+  opts: { checkDayLimit?: boolean } = {},
 ): PassCheck {
   const tripDays = daysIn(window);
   if (pass === 'none') {
@@ -65,7 +67,10 @@ export function passCheck(
   const blackoutDates = datesIn(window).filter((d) =>
     access.blackouts.some((b) => d >= b.start && d <= b.end),
   );
-  const overDayLimit = typeof access.daysLimit === 'number' && tripDays > access.daysLimit;
+  const overDayLimit =
+    opts.checkDayLimit !== false &&
+    typeof access.daysLimit === 'number' &&
+    tripDays > access.daysLimit;
 
   const limit =
     access.daysLimit === 'unlimited'

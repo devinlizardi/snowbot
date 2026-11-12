@@ -334,11 +334,39 @@ describe('/snapshot', () => {
     ).toBeUndefined();
   });
 
-  it('declares private as a real boolean option', () => {
+  it('declares private, spot (autocomplete) and region (choices) options', () => {
     const def = COMMANDS.find((c) => c.name === 'snapshot')!.toJSON();
     expect(def.options).toEqual([
       expect.objectContaining({ name: 'private', type: 5, required: false }),
+      expect.objectContaining({ name: 'spot', type: 3, required: false, autocomplete: true }),
+      expect.objectContaining({
+        name: 'region',
+        type: 3,
+        required: false,
+        choices: ['WEST', 'EAST', 'ROCKIES', 'ABROAD'].map((g) => ({ name: g, value: g })),
+      }),
     ]);
+  });
+
+  it('passes a known spot, or a region, through to the action', async () => {
+    expect((await handle('snapshot', null, { spot: 'Mammoth' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      spot: 'mammoth',
+    });
+    expect((await handle('snapshot', null, { spot: 'aspen' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      spot: 'aspen',
+    });
+    expect((await handle('snapshot', null, { region: 'east' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      group: 'EAST',
+    });
+  });
+
+  it('refuses a spot that is not tracked', async () => {
+    const r = await handle('snapshot', null, { spot: 'revelstoke' }, stranger());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/isn't a spot the bot tracks/);
   });
 });
 

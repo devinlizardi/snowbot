@@ -7,7 +7,7 @@ import {
   type ChatInputCommandInteraction,
   type Client,
 } from 'discord.js';
-import type { Config } from '../config.js';
+import { DISPLAY_GROUPS, type Config, type DisplayGroup } from '../config.js';
 import type { ChannelTarget } from './client.js';
 import { kvGet, kvSet, type DB } from '../db.js';
 import { log } from '../logger.js';
@@ -33,7 +33,9 @@ export type CommandContext = {
 };
 
 export type CommandAction =
-  { kind: 'build'; destination?: string; month?: string } | { kind: 'trip' } | { kind: 'snapshot' };
+  | { kind: 'build'; destination?: string; month?: string }
+  | { kind: 'trip' }
+  | { kind: 'snapshot'; spot?: string; group?: DisplayGroup };
 
 export type CommandResult = {
   reply: string;
@@ -118,6 +120,20 @@ export const COMMANDS = [
     )
     .addBooleanOption((o) =>
       o.setName('private').setDescription('Only you see the reply').setRequired(false),
+    )
+    .addStringOption((o) =>
+      o
+        .setName('spot')
+        .setDescription('One spot, day by day')
+        .setRequired(false)
+        .setAutocomplete(true),
+    )
+    .addStringOption((o) =>
+      o
+        .setName('region')
+        .setDescription('Only one group of spots')
+        .setRequired(false)
+        .addChoices(...DISPLAY_GROUPS.map((g) => ({ name: g, value: g }))),
     ),
 
   new SlashCommandBuilder()
@@ -415,9 +431,17 @@ function trip(ctx: CommandContext): CommandResult {
  * and `/quiet` doesn't hold it back. Public by default, since people mostly
  * want to show the group; `private:true` makes it ephemeral.
  */
-function snapshot(opts: CommandOpts): CommandResult {
-  return ok('Pulling every forecast for every spot…', {
-    action: { kind: 'snapshot' },
+function snapshot(opts: CommandOpts, ctx: CommandContext): CommandResult {
+  const spot = str(opts, 'spot')?.toLowerCase() || undefined;
+  const region = str(opts, 'region')?.toUpperCase() || undefined;
+  if (spot && spot !== 'aspen' && !ctx.cfg.board.some((d) => d.id === spot)) {
+    const ids = ['aspen', ...ctx.cfg.board.map((d) => d.id)].join(', ');
+    return oops(`"${spot}" isn't a spot the bot tracks. Try one of: ${ids}.`);
+  }
+  const group = DISPLAY_GROUPS.find((g) => g === region);
+  if (region && !group) return oops(`Region should be one of ${DISPLAY_GROUPS.join(', ')}.`);
+  return ok(spot ? `Pulling every forecast for ${spot}…` : 'Pulling every forecast for every spot…', {
+    action: { kind: 'snapshot', ...(spot ? { spot } : {}), ...(group && !spot ? { group } : {}) },
     ...(opts.private === true ? { ephemeral: true } : {}),
   });
 }
@@ -500,7 +524,7 @@ export async function handle(
     case 'trip':
       return trip(ctx);
     case 'snapshot':
-      return snapshot(opts);
+      return snapshot(opts, ctx);
     case 'build':
       return build(opts, ctx);
     case 'watch':
@@ -538,6 +562,8 @@ export async function registerCommands(args: {
 export type InteractionDeps = {
   db: DB;
   cfg: Config;
+  /** Autocomplete answers, by option name; e.g. `spot` → spotChoices. */
+  autocomplete?: (option: string, typed: string) => { name: string; value: string }[];
   target?: ChannelTarget;
   /** Runs the returned action; whatever it resolves to replaces the reply. */
   onAction?: (action: CommandAction, ctx: CommandContext) => Promise<string | undefined>;
@@ -571,6 +597,14 @@ function optionsOf(interaction: ChatInputCommandInteraction): {
 
 export function attachInteractionHandler(client: Client, deps: InteractionDeps): void {
   client.on('interactionCreate', async (interaction) => {
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused(true);
+      const choices = deps.autocomplete?.(focused.name, String(focused.value)) ?? [];
+      await interaction.respond(choices.slice(0, 25)).catch((err: unknown) => {
+        log.warn('autocomplete failed', { error: String(err) });
+      });
+      return;
+    }
     if (!interaction.isChatInputCommand()) return;
     const ctx: CommandContext = {
       db: deps.db,
