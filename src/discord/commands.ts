@@ -131,18 +131,6 @@ export const COMMANDS = [
     ),
 
   new SlashCommandBuilder()
-    .setName('watch')
-    .setDescription('Start daily fare tracking for an expedition')
-    .addStringOption((o) =>
-      o.setName('id').setDescription('Expedition id from the dossier').setRequired(true),
-    ),
-
-  new SlashCommandBuilder()
-    .setName('unwatch')
-    .setDescription('Stop tracking an expedition')
-    .addStringOption((o) => o.setName('id').setDescription('Expedition id').setRequired(true)),
-
-  new SlashCommandBuilder()
     .setName('quiet')
     .setDescription('Mute non-urgent posts for a while')
     .addIntegerOption((o) =>
@@ -153,6 +141,25 @@ export const COMMANDS = [
         .setMinValue(1)
         .setMaxValue(QUIET_MAX_DAYS),
     ),
+];
+
+/**
+ * Built and tested but not registered with Discord (PULL-MODEL.md P1): fare
+ * watching is backlogged along with the weekly build. The handlers below still
+ * answer them, so putting them back is one line in `COMMANDS`.
+ */
+export const BACKLOGGED_COMMANDS = [
+  new SlashCommandBuilder()
+    .setName('watch')
+    .setDescription('Start daily fare tracking for an expedition')
+    .addStringOption((o) =>
+      o.setName('id').setDescription('Expedition id from the dossier').setRequired(true),
+    ),
+
+  new SlashCommandBuilder()
+    .setName('unwatch')
+    .setDescription('Stop tracking an expedition')
+    .addStringOption((o) => o.setName('id').setDescription('Expedition id').setRequired(true)),
 ];
 
 /* --------------------------------------------------------------- helpers */
@@ -440,8 +447,7 @@ function setWatch(
   const row = ctx.db
     .prepare('SELECT id, destination, status, channel_target FROM expeditions WHERE id = ?')
     .get(id) as
-    | { id: string; destination: string; status: string; channel_target: ChannelTarget }
-    | undefined;
+    { id: string; destination: string; status: string; channel_target: ChannelTarget } | undefined;
   if (!row) return oops(`No expedition called "${id}".`);
   if (ctx.target && row.channel_target !== ctx.target) {
     return oops(`${id} was posted in the ${row.channel_target} channel — (un)watch it there.`);

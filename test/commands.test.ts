@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type Config } from '../src/config.js';
 import { kvGet, openDb, type DB } from '../src/db.js';
-import { COMMANDS, handle, isQuiet, type CommandContext } from '../src/discord/commands.js';
+import {
+  BACKLOGGED_COMMANDS,
+  COMMANDS,
+  handle,
+  isQuiet,
+  type CommandContext,
+} from '../src/discord/commands.js';
 
 let db: DB;
 let cfg: Config;
@@ -41,20 +47,15 @@ const airportsOf = (discordId: string): string[] =>
   ) as string[];
 
 describe('definitions', () => {
-  it('declares every command PLAN.md §1C lists', () => {
+  it('registers every live command, and not /watch or /unwatch (PULL-MODEL P1)', () => {
     const names = COMMANDS.map((c) => c.name).sort();
-    expect(names).toEqual([
-      'airports',
-      'build',
-      'flight',
-      'join',
-      'quiet',
-      'snapshot',
-      'trip',
-      'unwatch',
-      'watch',
-    ]);
+    expect(names).toEqual(['airports', 'build', 'flight', 'join', 'quiet', 'snapshot', 'trip']);
     for (const c of COMMANDS) expect(() => c.toJSON()).not.toThrow();
+  });
+
+  it('keeps /watch and /unwatch built but unregistered', () => {
+    expect(BACKLOGGED_COMMANDS.map((c) => c.name).sort()).toEqual(['unwatch', 'watch']);
+    for (const c of BACKLOGGED_COMMANDS) expect(() => c.toJSON()).not.toThrow();
   });
 });
 
@@ -226,13 +227,9 @@ describe('/watch and /unwatch', () => {
     insertExpedition('old', 'retired');
     insertExpedition('w', 'watched');
     expect((await handle('watch', null, { id: 'nope' }, m1())).reply).toMatch(/No expedition/);
-    expect((await handle('watch', null, { id: 'old' }, m1())).reply).toMatch(
-      /window has passed/,
-    );
+    expect((await handle('watch', null, { id: 'old' }, m1())).reply).toMatch(/window has passed/);
     expect((await handle('watch', null, { id: 'w' }, m1())).reply).toMatch(/already watched/);
-    expect((await handle('unwatch', null, { id: 'old' }, m1())).reply).toMatch(
-      /window has passed/,
-    );
+    expect((await handle('unwatch', null, { id: 'old' }, m1())).reply).toMatch(/window has passed/);
     expect(status('old')).toBe('retired');
     expect(status('w')).toBe('watched');
   });

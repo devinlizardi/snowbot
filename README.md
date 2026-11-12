@@ -80,10 +80,21 @@ Each tick runs a job exactly the way the CLI does, so anything that works with
 | ----------------- | ------------- | ------------ |
 | `aspenUpdate`     | daily 07:00   | `0 7 * * *`  |
 | `flightWatch`     | hourly at :10 | `10 * * * *` |
-| `expeditionBuild` | Mondays 08:00 | `0 8 * * 1`  |
-| `expeditionWatch` | daily 09:00   | `0 9 * * *`  |
+| `expeditionBuild` | never (backlogged) | — (`/build` on demand) |
+| `expeditionWatch` | never (backlogged) | —            |
 | `noop`            | never         | —            |
 | `snapshot`        | never         | — (`/snapshot` on demand) |
+
+The weekly build and the fare watch came off the clock in the pull-model change
+(`PULL-MODEL.md` P1); their code and tables stay, and `/watch` `/unwatch` are
+built but not registered. After deploying that change, retire any live watches
+once on the droplet, from `/opt/snowbot` (the container has no sqlite CLI; see
+`deploy/README.md`):
+
+```sh
+sqlite3 data/snowbot.sqlite \
+  "UPDATE expeditions SET status = 'retired' WHERE status = 'watched';"
+```
 
 `SNOWBOT_DRY_RUN=1` turns every scheduled tick into a dry run; `SNOWBOT_CHANNEL`
 picks the channel exactly as `--channel` does. Slash commands are registered
