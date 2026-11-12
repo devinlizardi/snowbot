@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildExpedition, type Expedition, type ExpeditionInputs } from '../src/builder.js';
+import { buildExpedition, quoteFor, type Expedition, type ExpeditionInputs } from '../src/builder.js';
 import { loadConfig, type Config, type Destination } from '../src/config.js';
 import { kvGet, kvSet, openDb, type DB } from '../src/db.js';
 import { Poster } from '../src/discord/client.js';
@@ -11,7 +11,9 @@ import {
   KV_LAST_BUILD,
   kvDetailsKey,
   type LastBuild,
+  KV_RECENT_QUOTES,
   pickWindow,
+  rememberQuote,
   runExpeditionBuild,
   type ExpeditionBuildDeps,
   type SnowSignal,
@@ -414,6 +416,35 @@ describe('quotes', () => {
     expect(fallbackRender(buildExpedition(nisekoInputs({ dest: unquoted }), cfg, NOW)).root).not.toMatch(/^> /m);
   });
 
+  it('skips a quote another expedition used recently, but a rebuild keeps its own', () => {
+    const steamboat = by('steamboat');
+    const first = quoteFor(steamboat, cfg, 'steamboat-0206')!;
+    const recent = [{ id: 'solitude-0206', text: first.text }];
+    const other = quoteFor(steamboat, cfg, 'steamboat-0206', recent);
+    expect(other).not.toBeNull();
+    expect(other!.text).not.toBe(first.text);
+    // A rebuild of the same expedition keeps the quote it already went out with.
+    expect(quoteFor(steamboat, cfg, 'steamboat-0206', [{ id: 'steamboat-0206', text: first.text }])).toEqual(first);
+    // A destination's own quote is skipped too when someone else just used it.
+    const niseko = by('niseko');
+    const own = niseko.pitch.quote!;
+    expect(quoteFor(niseko, cfg, 'niseko-0206', [{ id: 'x', text: own.text }])?.text).not.toBe(own.text);
+    // Nothing fresh left: no quote.
+    const all = [own, ...cfg.expedition.quote_pool].map((q) => ({ id: 'x', text: q.text }));
+    expect(quoteFor(niseko, cfg, 'niseko-0206', all)).toBeNull();
+  });
+
+  it('remembers only the last few quotes', () => {
+    const db = openDb(':memory:');
+    for (let i = 0; i < 6; i += 1) rememberQuote(db, `e${i}`, `q${i}`);
+    expect(JSON.parse(kvGet(db, KV_RECENT_QUOTES)!)).toEqual([
+      { id: 'e5', text: 'q5' },
+      { id: 'e4', text: 'q4' },
+      { id: 'e3', text: 'q3' },
+      { id: 'e2', text: 'q2' },
+    ]);
+  });
+
   it('every quote in config is attributed', () => {
     const all = [...cfg.board.flatMap((d) => (d.pitch.quote ? [d.pitch.quote] : [])), ...cfg.expedition.quote_pool];
     expect(all.length).toBeGreaterThanOrEqual(7);
@@ -775,6 +806,33 @@ describe('runExpeditionBuild', () => {
     expect(nearMisses()).toEqual([]);
     expect(kvGet(db, KV_BUILD_REQUEST)).toBeUndefined();
     expect(posts().map((p) => p.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
+  });
+
+  it('two dossiers in a row never share a quote (the Whistler/Revelstoke repeat)', async () => {
+    // Neither spot has a quote of its own, so both draw from the two-quote pool.
+    const quotes: (string | undefined)[] = [];
+    for (const destination of ['steamboat', 'solitude']) {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination }));
+      const out = await runExpeditionBuild(ctx(), deps());
+      quotes.push(out?.expedition.quote?.text);
+    }
+    expect(quotes.every((q) => q !== undefined)).toBe(true);
+    expect(quotes[0]).not.toBe(quotes[1]);
+    expect(JSON.parse(kvGet(db, KV_RECENT_QUOTES)!)).toHaveLength(2);
+  });
+
+  it('omits the quote when every fresh one is used up', async () => {
+    cfg.expedition.quote_pool = cfg.expedition.quote_pool.slice(0, 1);
+    for (const destination of ['steamboat', 'solitude']) {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination }));
+      await runExpeditionBuild(ctx(), deps());
+    }
+    const second = await (async () => {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination: 'winter-park' }));
+      return runExpeditionBuild(ctx(), deps());
+    })();
+    expect(second?.expedition.quote).toBeNull();
+    expect(second?.dossier.root).not.toMatch(/^> /m);
   });
 
   it('forced build passes the month hint into the window it asks gather for', async () => {

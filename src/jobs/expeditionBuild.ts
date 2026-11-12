@@ -2,11 +2,13 @@ import {
   buildExpedition,
   gatherExpeditionInputs,
   insertExpedition,
+  quoteFor,
   resortSnowFor,
   type DateWindow,
   type Expedition,
   type ExpeditionInputs,
   type ExpeditionResortSnow,
+  type RecentQuote,
 } from '../builder.js';
 import { optionalSecret, type Destination } from '../config.js';
 import type { DB } from '../db.js';
@@ -239,6 +241,10 @@ export async function runExpeditionBuild(
     );
   }
 
+  // The builder's pick is stable but blind to history; re-pick against what
+  // the last few posts used so two dossiers in a row never share a quote.
+  built.quote = quoteFor(built.destination, cfg, built.id, recentQuotes(db));
+
   const existing = db
     .prepare(`SELECT root_message_id, thread_id FROM expeditions WHERE id = ?`)
     .get(built.id) as { root_message_id: string | null; thread_id: string | null } | undefined;
@@ -258,7 +264,38 @@ export async function runExpeditionBuild(
     rootMessageId: root?.root_message_id ?? null,
   };
   kvSet(db, KV_LAST_BUILD, JSON.stringify(last));
+  if (posted && built.quote) rememberQuote(db, built.id, built.quote.text);
   return { expedition: built, dossier, posted, forced };
+}
+
+/* --------------------------------------------------------------- quotes */
+
+export const KV_RECENT_QUOTES = 'quote:recent';
+/** How many past dossiers' quotes stay off-limits to a different expedition. */
+export const RECENT_QUOTE_WINDOW = 4;
+
+export function recentQuotes(db: DB): RecentQuote[] {
+  const raw = kvGet(db, KV_RECENT_QUOTES);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (r): r is RecentQuote =>
+            typeof r === 'object' && r !== null && typeof r.id === 'string' && typeof r.text === 'string',
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberQuote(db: DB, id: string, text: string): void {
+  const next = [{ id, text }, ...recentQuotes(db).filter((r) => r.id !== id)].slice(
+    0,
+    RECENT_QUOTE_WINDOW,
+  );
+  kvSet(db, KV_RECENT_QUOTES, JSON.stringify(next));
 }
 
 /**
