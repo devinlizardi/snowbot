@@ -9,7 +9,10 @@ import { KV_LAST_STATUS } from './jobs/aspenUpdate.js';
 import { buildReply, KV_LAST_BUILD, type LastBuild } from './jobs/expeditionBuild.js';
 import { log } from './logger.js';
 import { LlmClient } from './llm/client.js';
-import { cachedPassAccess } from './passLookup.js';
+import { cachedPassAccess, fetchPassAccess } from './passLookup.js';
+import { parsePriceButton, runScout } from './scout.js';
+import { fetchClimatology } from './sources/weather/climatology.js';
+import type { Completer } from './sources/lookup.js';
 import { runSnapshot } from './snapshot.js';
 import { runSpotSnapshot, spotChoices } from './snapshotSpot.js';
 import { startScheduler, type Scheduler } from './scheduler.js';
@@ -56,6 +59,10 @@ export function tripText(db: DB): string | undefined {
   return status?.trim() ? status : undefined;
 }
 
+const NO_KEY: Completer = {
+  complete: () => Promise.reject(new Error('no ANTHROPIC_API_KEY')),
+};
+
 export type ServeOptions = {
   env?: NodeJS.ProcessEnv;
   port?: number;
@@ -94,6 +101,12 @@ export async function startServe(
       cfg,
       target,
       autocomplete: (option, typed) => (option === 'spot' ? spotChoices(cfg, typed) : []),
+      onButton: (customId) => {
+        const p = parsePriceButton(customId);
+        return p && cfg.board.some((d) => d.id === p.destination)
+          ? { kind: 'build', destination: p.destination, window: p.window }
+          : null;
+      },
       onAction: async (action: CommandAction, ctx) => {
         if (action.kind === 'trip') {
           return tripText(db) ?? 'No Aspen status yet — the first briefing has not run.';
@@ -121,6 +134,23 @@ export async function startServe(
             ...(action.group ? { group: action.group } : {}),
           });
           return result.text;
+        }
+        if (action.kind === 'scout') {
+          const slog = log.child({ command: 'build', user: ctx.user.name });
+          const result = await runScout(
+            { cfg, db, log: slog, now: ctx.now },
+            {
+              offline: false,
+              climatology: (dest, window) =>
+                fetchClimatology({ cfg, db, now: ctx.now, log: slog }, dest, window),
+              // Live through a week-long cache when there's a key; cache only without.
+              passAccess: (dest) =>
+                fetchPassAccess(db, cfg, snapshotLlm ?? NO_KEY, dest, ctx.now, {
+                  offline: snapshotLlm === null,
+                }),
+            },
+          );
+          return { content: result.text, buttons: result.buttons };
         }
         const job = jobs.expeditionBuild;
         if (!job) return 'The expedition builder is not wired in this build yet.';

@@ -92,7 +92,8 @@ export type SnowSignal = {
   historicalReason?: string;
 };
 
-export type BuildRequest = { destination?: string; month?: string };
+/** `window` comes from a 💲 Price it button: build exactly those dates. */
+export type BuildRequest = { destination?: string; month?: string; window?: DateWindow };
 
 export type ExpeditionBuildDeps = {
   /** The expensive half: SerpApi + lookups. Stubbed in tests. */
@@ -210,7 +211,10 @@ export async function runExpeditionBuild(
   const forced = forcedDest !== undefined;
   let built: Expedition | null = null;
   for (const dest of candidates.slice(0, MAX_BUILD_ATTEMPTS)) {
-    const window = pickWindow(dest, now, request?.month, aspen, cfg.expedition.season);
+    const window =
+      forced && request?.window
+        ? request.window
+        : pickWindow(dest, now, request?.month, aspen, cfg.expedition.season);
     log.info('building', { destination: dest.id, window });
     let inputs: ExpeditionInputs;
     try {
@@ -623,10 +627,15 @@ function takeBuildRequest(db: DB, log: JobContext['log']): BuildRequest | null {
   if (!raw) return null;
   kvDelete(db, KV_BUILD_REQUEST);
   try {
-    const parsed = JSON.parse(raw) as { destination?: unknown; month?: unknown };
+    const parsed = JSON.parse(raw) as { destination?: unknown; month?: unknown; window?: unknown };
+    const w = parsed.window as { start?: unknown; end?: unknown } | undefined;
+    const iso = (x: unknown): x is string => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x);
     return {
       ...(typeof parsed.destination === 'string' ? { destination: parsed.destination } : {}),
       ...(typeof parsed.month === 'string' ? { month: parsed.month } : {}),
+      ...(w && iso(w.start) && iso(w.end) && w.end >= w.start
+        ? { window: { start: w.start, end: w.end } }
+        : {}),
     };
   } catch {
     log.warn('unreadable build request ignored', { raw });

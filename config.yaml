@@ -154,6 +154,20 @@ expedition:
     cost: 0.20
     logistics_ease: 0.15
 
+# /build with no arguments: "what's worth watching". Weather only — no cost
+# term and no SerpApi. Starting weights, validated to sum to 1; tune freely.
+scout:
+  weights:
+    forecast_7d: 0.40 # this week's modelled snow, confidence-weighted
+    lookahead_8_15: 0.20 # days 8–15, always treated as low confidence
+    observed_7d: 0.15 # what actually fell last week (ERA5 archive)
+    historical: 0.25 # how the coming weeks usually go there
+  max_picks: 3
+  # A pick needs at least this score, and some real snow in the models.
+  min_score: 0.25
+  # Two spots this close whose biggest days line up are under the same storm.
+  same_storm_km: 500
+
 # Which pass the group rides on. Decides which board entries make sense and
 # what passCheck compares a trip against; the pass facts themselves (days,
 # blackouts) only ever come from the live lookup, never from this file.

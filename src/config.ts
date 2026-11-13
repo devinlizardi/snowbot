@@ -185,6 +185,26 @@ const ConfigSchema = z
       }),
     }),
 
+    /** `/build` with no arguments (PULL-MODEL P6): weather only, no money. */
+    scout: z
+      .object({
+        weights: z.object({
+          forecast_7d: z.number().min(0),
+          lookahead_8_15: z.number().min(0),
+          observed_7d: z.number().min(0),
+          historical: z.number().min(0),
+        }),
+        max_picks: z.number().int().min(1).max(5).default(3),
+        min_score: z.number().min(0).max(1).default(0.25),
+        same_storm_km: z.number().positive().default(500),
+      })
+      .default({
+        weights: { forecast_7d: 0.4, lookahead_8_15: 0.2, observed_7d: 0.15, historical: 0.25 },
+        max_picks: 3,
+        min_score: 0.25,
+        same_storm_km: 500,
+      }),
+
     /** The pass the group rides on. Pass facts still only come from the live lookup. */
     group: z
       .object({ pass: z.enum(['ikon_base', 'ikon', 'none']).default('ikon_base') })
@@ -205,6 +225,11 @@ const ConfigSchema = z
       w.logistics_ease;
     if (Math.abs(sum - 1) > 1e-6) {
       ctx.addIssue({ code: 'custom', path: ['expedition', 'ranking_weights'], message: `weights must sum to 1, got ${sum}` });
+    }
+    const sw = cfg.scout.weights;
+    const ssum = sw.forecast_7d + sw.lookahead_8_15 + sw.observed_7d + sw.historical;
+    if (Math.abs(ssum - 1) > 1e-6) {
+      ctx.addIssue({ code: 'custom', path: ['scout', 'weights'], message: `scout weights must sum to 1, got ${ssum}` });
     }
     const ids = cfg.board.map((d) => d.id);
     const dupe = ids.find((id, i) => ids.indexOf(id) !== i);

@@ -1,5 +1,8 @@
 import {
+  ActionRowBuilder,
   ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
   REST,
   Routes,
@@ -33,7 +36,8 @@ export type CommandContext = {
 };
 
 export type CommandAction =
-  | { kind: 'build'; destination?: string; month?: string }
+  | { kind: 'build'; destination: string; month?: string; window?: { start: string; end: string } }
+  | { kind: 'scout' }
   | { kind: 'trip' }
   | { kind: 'snapshot'; spot?: string; group?: DisplayGroup };
 
@@ -138,12 +142,15 @@ export const COMMANDS = [
 
   new SlashCommandBuilder()
     .setName('build')
-    .setDescription('Force an expedition build')
+    .setDescription("What's worth watching — or, with a destination, price a trip there")
     .addStringOption((o) =>
-      o.setName('destination').setDescription('Board id, e.g. niseko').setRequired(false),
+      o.setName('destination').setDescription('Board id to price, e.g. mammoth').setRequired(false),
     )
     .addStringOption((o) =>
-      o.setName('month').setDescription('Target month, YYYY-MM').setRequired(false),
+      o.setName('month').setDescription('Month to price, YYYY-MM').setRequired(false),
+    )
+    .addBooleanOption((o) =>
+      o.setName('private').setDescription('Only you see the reply').setRequired(false),
     ),
 
   new SlashCommandBuilder()
@@ -456,9 +463,15 @@ function build(opts: CommandOpts, ctx: CommandContext): CommandResult {
     return oops(`"${destination}" isn't on the board. Try one of: ${ids}.`);
   }
   if (month && !ISO_MONTH.test(month)) return oops(`Month should be YYYY-MM, not "${month}".`);
-  const what = destination ? `a ${destination} plan` : 'the best plan on the board';
-  return ok(`Building ${what}${month ? ` for ${month}` : ''} — this takes a few minutes.`, {
-    action: { kind: 'build', ...(destination ? { destination } : {}), ...(month ? { month } : {}) },
+  const priv = opts.private === true ? { ephemeral: true } : {};
+  if (!destination) {
+    if (month) return oops('Pick a `destination` to price a month — `/build` alone shows what to watch.');
+    // No arguments: the weather-only scout view. No money, no SerpApi.
+    return ok("Looking at what's worth watching…", { action: { kind: 'scout' }, ...priv });
+  }
+  return ok(`Pricing ${destination}${month ? ` for ${month}` : ''} — this takes a few minutes.`, {
+    action: { kind: 'build', destination, ...(month ? { month } : {}) },
+    ...priv,
   });
 }
 
@@ -559,6 +572,12 @@ export async function registerCommands(args: {
 
 /* ------------------------------------------------------ discord plumbing */
 
+/** What an action resolves to: plain text, or text with 💲 buttons under it. */
+export type ActionReply =
+  | string
+  | { content: string; buttons?: { customId: string; label: string }[] }
+  | undefined;
+
 export type InteractionDeps = {
   db: DB;
   cfg: Config;
@@ -566,7 +585,9 @@ export type InteractionDeps = {
   autocomplete?: (option: string, typed: string) => { name: string; value: string }[];
   target?: ChannelTarget;
   /** Runs the returned action; whatever it resolves to replaces the reply. */
-  onAction?: (action: CommandAction, ctx: CommandContext) => Promise<string | undefined>;
+  onAction?: (action: CommandAction, ctx: CommandContext) => Promise<ActionReply>;
+  /** Turns a button's custom_id into an action (💲 Price it), or null to ignore it. */
+  onButton?: (customId: string) => CommandAction | null;
   now?: () => Date;
 };
 
@@ -605,6 +626,19 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
       });
       return;
     }
+    if (interaction.isButton()) {
+      const action = deps.onButton?.(interaction.customId) ?? null;
+      if (!action || !deps.onAction) return;
+      const ctx = contextFor(deps, interaction.user.id, interaction.user.displayName, interaction.member);
+      try {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.editReply(toMessage(await deps.onAction(action, ctx), 'Done.'));
+      } catch (err) {
+        log.error('button failed', { customId: interaction.customId, error: String(err) });
+        await interaction.editReply('Something broke handling that — check the logs.').catch(() => {});
+      }
+      return;
+    }
     if (!interaction.isChatInputCommand()) return;
     const ctx: CommandContext = {
       db: deps.db,
@@ -627,7 +661,7 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
         // Builds take minutes; acknowledge now, edit the reply when done.
         await interaction.deferReply(flags ? { flags } : {});
         const out = await deps.onAction(result.action, ctx);
-        await interaction.editReply(out ?? result.reply);
+        await interaction.editReply(toMessage(out, result.reply));
       } else {
         await interaction.reply(
           flags ? { content: result.reply, flags } : { content: result.reply },
@@ -641,4 +675,47 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
       else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   });
+}
+
+function contextFor(
+  deps: InteractionDeps,
+  userId: string,
+  fallbackName: string,
+  member: unknown,
+): CommandContext {
+  return {
+    db: deps.db,
+    cfg: deps.cfg,
+    now: deps.now ? deps.now() : new Date(),
+    ...(deps.target ? { target: deps.target } : {}),
+    user: {
+      id: userId,
+      name:
+        member && typeof member === 'object' && 'displayName' in member
+          ? String((member as { displayName: unknown }).displayName)
+          : fallbackName,
+    },
+  };
+}
+
+/** An action's reply as a Discord edit: content, plus a row of buttons when there are any. */
+export function toMessage(
+  out: ActionReply,
+  fallback: string,
+): { content: string; components: ActionRowBuilder<ButtonBuilder>[] } {
+  if (out === undefined) return { content: fallback, components: [] };
+  if (typeof out === 'string') return { content: out, components: [] };
+  const buttons = (out.buttons ?? []).slice(0, 5);
+  return {
+    content: out.content,
+    components: buttons.length
+      ? [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            buttons.map((b) =>
+              new ButtonBuilder().setCustomId(b.customId).setLabel(b.label).setStyle(ButtonStyle.Secondary),
+            ),
+          ),
+        ]
+      : [],
+  };
 }

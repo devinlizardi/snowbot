@@ -470,7 +470,7 @@ describe('dossier prompt + fallback', () => {
     expect(prompt).toContain('"headerLine"');
     expect(prompt).toContain('M3: BUR $684 / LAX $511');
     const t = trimForPrompt(e);
-    expect(t.watchCommand).toBe('/watch niseko-0206');
+    expect(prompt).not.toMatch(/\/watch|decideBy|ceiling/);
     expect(t.destination.pitch.hook).toMatch(/powder/);
     expect(t.snow.mode).toBe('history');
     // Past the horizon there is no forecast to misread as one.
@@ -500,8 +500,8 @@ describe('dossier prompt + fallback', () => {
     expect(d.root).toContain('❄️ **The snow**');
     expect(d.root).toContain('💸 **All-in** — **$');
     expect(d.root).toContain('at Hirafu Pine Chalet');
-    expect(d.root).toContain('**Decide by 2026-09-28.**');
-    expect(d.root).toContain('`/watch niseko-0206`');
+    // Pull model: a price check, not a deadline.
+    expect(d.root).not.toMatch(/Decide by|\/watch|ceiling/);
     expect(d.details).toHaveLength(3);
   });
 
@@ -520,7 +520,7 @@ describe('dossier prompt + fallback', () => {
     expect(rows.find((r) => r.startsWith('M3'))).toContain('$551*');
     for (const r of rows) expect(r.length).toBeLessThanOrEqual(42);
     for (const line of e.routing.deltaLines) expect(flights).toContain(line);
-    expect(flights).toMatch(/📉 JFK fares across/);
+    expect(flights).not.toMatch(/📉/);
   });
 
   it('draws the stay as a table with a clickable, non-unfurling link per option', () => {
@@ -833,6 +833,26 @@ describe('runExpeditionBuild', () => {
     })();
     expect(second?.expedition.quote).toBeNull();
     expect(second?.dossier.root).not.toMatch(/^> /m);
+  });
+
+  it('💲 Price it builds exactly the scouted window, with no decide-by and no ceiling talk', async () => {
+    kvSet(
+      db,
+      KV_BUILD_REQUEST,
+      JSON.stringify({ kind: 'build', destination: 'niseko', window: { start: '2027-02-06', end: '2027-02-15' } }),
+    );
+    let asked: { start: string; end: string } | null = null;
+    const d = deps();
+    d.gather = async (_c, dest, window) => {
+      asked = window;
+      return nisekoInputs({ dest }, 1800);
+    };
+    const out = await runExpeditionBuild(ctx(), d);
+    expect(asked).toEqual({ start: '2027-02-06', end: '2027-02-15' });
+    expect(out?.forced).toBe(true);
+    const all = [out!.dossier.root, ...out!.dossier.details].join('\n');
+    expect(all).not.toMatch(/Decide by|decide by|\/watch|ceiling/);
+    expect(posts().map((p) => p.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
   });
 
   it('forced build passes the month hint into the window it asks gather for', async () => {

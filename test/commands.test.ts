@@ -6,6 +6,7 @@ import {
   COMMANDS,
   handle,
   isQuiet,
+  toMessage,
   type CommandContext,
 } from '../src/discord/commands.js';
 
@@ -279,9 +280,31 @@ describe('/build', () => {
     expect(r.ephemeral).toBeFalsy();
   });
 
-  it('omits options that were not given', async () => {
+  it('with no arguments, scouts instead of pricing (PULL-MODEL P6)', async () => {
     const r = await handle('build', null, {}, m1());
-    expect(r.action).toEqual({ kind: 'build' });
+    expect(r.action).toEqual({ kind: 'scout' });
+    expect(r.ephemeral).toBeFalsy();
+    expect((await handle('build', null, { private: true }, m1())).ephemeral).toBe(true);
+  });
+
+  it('wants a destination before it prices a month', async () => {
+    const r = await handle('build', null, { month: '2027-02' }, m1());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/Pick a `destination`/);
+  });
+
+  it('turns an action reply with buttons into one row of Discord buttons', () => {
+    const m = toMessage(
+      { content: 'x', buttons: [{ customId: 'price:mammoth:2026-11-20:2026-11-22', label: '💲 Price Mammoth' }] },
+      'fallback',
+    );
+    expect(m.content).toBe('x');
+    const row = m.components[0]!.toJSON();
+    expect(row.components).toEqual([
+      expect.objectContaining({ custom_id: 'price:mammoth:2026-11-20:2026-11-22', label: '💲 Price Mammoth' }),
+    ]);
+    expect(toMessage('plain', 'f')).toEqual({ content: 'plain', components: [] });
+    expect(toMessage(undefined, 'f').content).toBe('f');
   });
 
   it('rejects an unknown destination or a malformed month without an action', async () => {
