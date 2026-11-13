@@ -9,7 +9,7 @@ import { formatSnowLine } from '../../sources/weather/consensus.js';
  * It is two things now, both built from the Expedition object and nothing else:
  *
  *   - a **root post** in the channel: the pitch. Header, the hook, why go, the
- *     snow story, what it costs all-in, the catch, a call to commit.
+ *     snow story, what it costs all-in, the catch, an easy-going sign-off.
  *   - a **thread** under it: the dossier proper, one message per section —
  *     flights (a table), where you sleep (a table + links), the day-by-day
  *     plan with ground, passes and time off.
@@ -63,9 +63,9 @@ export type RenderedDossier = {
   details: string[];
 };
 
-export const DOSSIER_SYSTEM_PROMPT = `You write the weekly expedition dossier for a snowboarding crew's Discord: five friends split between New York and California who ride together every winter. The bot has already built a complete, bookable trip. Your job is to make them want it.
+export const DOSSIER_SYSTEM_PROMPT = `You write the expedition dossier for a snowboarding crew's Discord: five friends split between New York and California who ride together every winter. The bot has already built a complete, bookable trip. Your job is to make them want it.
 
-This post should be the thing they look forward to landing every Monday, and it should make a real case for going. Write like the friend in the group chat who did all the research, is genuinely excited, and is trying to get everyone to commit: specific, vivid, a little funny, never a travel agent.
+Someone in the group pressed "Price it" because the weather caught their eye. Make a real case for going, and lay out what it costs, without pressure: no deadlines, no "book now", no fare-is-about-to-move urgency. Write like the friend in the group chat who did all the research and is genuinely excited: specific, vivid, a little funny, never a travel agent.
 
 You are handed a JSON expedition. Everything factual you write comes from it.
 
@@ -94,8 +94,8 @@ Only a JSON object, no code fences, with exactly these fields. The bot draws the
 - flightsNote (≤${COPY_LIMITS.flightsNote} chars): why the routing works: who flies from where, anyone who should drive to a hub and why, how close together everyone lands. It sits under the flight table; don't repeat the table row by row. The per-member delta lines are printed separately.
 - lodgingNote (≤${COPY_LIMITS.lodgingNote} chars): why option 1 is the one, and what 2 and 3 trade (cheaper, nicer). It sits under the lodging table and links. If lodging.estimated is true there is no listing, so say the price is an estimate.
 - plan: one entry per day in dayPlan, same dates, same order: {"date": "YYYY-MM-DD", "line": "≤${COPY_LIMITS.planLine} chars"}. Keep each day's type (travel, rest, on-snow) but give it life: arrival-night ramen, the rest-day onsen, the last-night dinner. Use pitch.off_snow and lodging highlights; don't invent named restaurants or events.
-- catch (≤${COPY_LIMITS.catch} chars): the honest downside and why deciding soon matters, from volatility.note and pitch.heads_up. The bot appends the decide-by date.
-- signoff (≤${COPY_LIMITS.signoff} chars): a one-line closer that asks them to commit.`;
+- catch (≤${COPY_LIMITS.catch} chars): the honest downside, from pitch.heads_up and the plan itself. No deadlines and nothing about deciding soon.
+- signoff (≤${COPY_LIMITS.signoff} chars): a one-line closer that invites interest without pushing.`;
 
 /* ------------------------------------------------------------ the prompt */
 
@@ -112,7 +112,6 @@ export function trimForPrompt(e: Expedition) {
     id: e.id,
     headerLine: headerLine(e),
     quote: e.quote ? { text: e.quote.text, by: e.quote.by } : null,
-    watchCommand: `/watch ${e.id}`,
     destination: {
       id: e.destination.id,
       name: e.destination.name,
@@ -226,8 +225,6 @@ export function trimForPrompt(e: Expedition) {
     cost: {
       perPersonUsd: e.cost.perPersonUsd,
       groupUsd: e.cost.groupUsd,
-      ceilingUsd: e.cost.ceilingUsd,
-      overCeiling: e.cost.overCeiling,
       perMember: e.cost.perMember.map((c) => ({
         member: c.member,
         chosenOrigin: c.chosenOrigin,
@@ -237,7 +234,8 @@ export function trimForPrompt(e: Expedition) {
         totalUsd: c.totalUsd,
       })),
     },
-    volatility: e.volatility,
+    // No ceiling and no volatility/decide-by: the priced view is a price
+    // check, not a deadline (PULL-MODEL P6).
   };
 }
 
@@ -375,11 +373,13 @@ function rootParts(e: Expedition, c: DossierCopy): Part[] {
     { key: 'pitch', text: `\n${c.pitch}` },
     { key: 'snow', text: `\n❄️ **The snow** — ${c.snow}` },
     { key: 'damage', text: `💸 **All-in** — ${damageLine(e)}` },
-    { key: 'catch', text: `⏳ **The catch** — ${catchLine} **Decide by ${e.volatility.decideBy}.**` },
+    // Pull model (PULL-MODEL P6): someone asked for this price, so no decide-by
+    // date and no fare-watch prompt — just the honest catch.
+    ...(catchLine.trim() ? [{ key: 'catch', text: `⏳ **The catch** — ${catchLine}` }] : []),
     { key: 'signoff', text: `\n${c.signoff}` },
     {
       key: 'footer',
-      text: `-# \`/watch ${e.id}\` starts daily fare tracking · flights, where you sleep and the day-by-day are in the thread 🧵`,
+      text: '-# flights, where you sleep and the day-by-day are in the thread 🧵',
     },
   ];
 }
@@ -405,10 +405,8 @@ function flightsParts(e: Expedition, c: DossierCopy): Part[] {
   if (e.routing.deltaLines.length) {
     parts.push({ key: 'deltas', text: e.routing.deltaLines.map((l) => `• ${l}`).join('\n') });
   }
-  parts.push({
-    key: 'volatility',
-    text: `📉 ${e.volatility.note.replace(/\s*Decide by [\d-]+\.?$/, '')}`,
-  });
+  // No fare-movement line: it was urgency framing. Fare context comes back only
+  // as a plain fact once fare_history has real data (not wired yet).
   return parts;
 }
 
@@ -579,8 +577,7 @@ export function fallbackCopy(e: Expedition): DossierCopy {
     ? 'No listing came back for these dates, so the stay is an estimate from the board band — the first thing to price for real.'
     : lodgingFallbackNote(l.options);
 
-  const vol = e.volatility.note.replace(/\s*Decide by [\d-]+\.?$/, '');
-  const catchText = [vol, p.heads_up[0] ? `${p.heads_up[0]}.` : ''].filter(Boolean).join(' ');
+  const catchText = p.heads_up[0] ? `${p.heads_up[0]}.` : '';
 
   return {
     hook: clamp(hook, COPY_LIMITS.hook),
@@ -590,7 +587,7 @@ export function fallbackCopy(e: Expedition): DossierCopy {
     lodgingNote: clamp(lodgingNote, COPY_LIMITS.lodgingNote),
     plan: fallbackPlan(e),
     catch: clamp(catchText, COPY_LIMITS.catch),
-    signoff: "Who's in? Say it here, and whoever's first, start the fare watch.",
+    signoff: 'Interested? Say so here — no rush, this is a price check, not a deadline.',
   };
 }
 
@@ -706,8 +703,7 @@ function damageLine(e: Expedition): string {
     ? `stay ~${usd(e.lodging.perPersonUsd)} (estimate)`
     : `stay ${usd(e.lodging.perPersonUsd)}${e.lodging.options[0] ? ` at ${e.lodging.options[0].name}` : ''}`;
   const ground = e.ground.perPersonUsd === null ? 'ground unpriced' : `ground ${usd(e.ground.perPersonUsd)}`;
-  const over = e.cost.overCeiling ? ` Over the ${usd(e.cost.ceilingUsd)} ceiling — someone asked for this one.` : '';
-  return `**${usd(e.cost.perPersonUsd)}/person** · ${flights}, ${stay}, ${ground}.${over}`;
+  return `**${usd(e.cost.perPersonUsd)}/person** · ${flights}, ${stay}, ${ground}.`;
 }
 
 function groundLine(e: Expedition): string {

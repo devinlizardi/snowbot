@@ -1,8 +1,10 @@
 # snowbot
 
 Discord bot for a five-person snowboarding group. Two jobs: keep everyone
-current on the **Aspen trip (Jan 24–30, 2027)**, and once a week build a
-complete, bookable **expedition** somewhere the snow is actually going off.
+current on the **Aspen trip (Jan 24–30, 2027)**, and, when someone asks, say
+where the snow is actually going off — with a price only if they want one.
+Discovery is on demand since the pull-model change (`PULL-MODEL.md`): the Aspen
+anchor and trip-day flight status are the only things that post on their own.
 
 Design rules, in short: one container, one process, one SQLite file, a handful
 of cron jobs. Everything in USD. The bot is allowed roughly one root message a
@@ -56,9 +58,36 @@ The jobs:
 | `noop`            | boot, validate config, open the db, log in, say what it found                 |
 | `aspenUpdate`     | monthly → weekly → daily Aspen briefing, written into the pinned anchor       |
 | `flightWatch`     | flight status for all five, one combined message at T-24h and T-3h            |
-| `expeditionBuild` | rank the destination board, build one expedition, post the dossier + thread   |
-| `expeditionWatch` | daily re-pricing of `/watch`ed expeditions into their thread                   |
+| `expeditionBuild` | build and post one priced expedition (what 💲 Price it and `/build destination:` run) |
+| `expeditionWatch` | daily re-pricing of watched expeditions (backlogged, off the clock)           |
 | `snapshot`        | print what `/snapshot` would reply; never posts, never scheduled              |
+
+## On demand: `/snapshot` and `/build`
+
+**`/snapshot`** — every spot, next 7 days, where the models agree and split.
+A short written read sits above the table (Haiku, from the composed numbers
+only; any number it gets wrong drops it back to the templated callouts), and a
+line below names storms the models are starting to agree on in days 8–15,
+always as low confidence.
+
+- `spot:` (autocomplete) — one spot day by day: model range, temps, gust,
+  freezing level, per-model totals, what fell last week, WeatherNext's band in
+  words, and the pass line if the pass lookup has already answered.
+- `region:` — `WEST`, `EAST`, `ROCKIES` or `ABROAD`; Aspen stays first.
+- `private:true` — only you see it.
+
+**`/build`** — with no arguments, "what's worth watching": up to three spots
+ranked on weather alone (no prices, no SerpApi), one per group and never two
+under the same storm, each with a suggested window, who could drive and who
+flies, and the Ikon Base pass check (blackouts, day limits). If nothing is
+going off it says so. Each pick has a **💲 Price it** button that runs the full
+builder for that spot and window and posts the dossier with its thread.
+
+- `destination:` `[month:]` — price a spot directly, same as the button.
+- `private:true` — only you see the reply (a priced dossier still posts).
+
+The dossier no longer carries a decide-by date, a fare-watch prompt or the
+ceiling: it is a price check, not a deadline.
 
 ## Serve mode
 
@@ -80,10 +109,21 @@ Each tick runs a job exactly the way the CLI does, so anything that works with
 | ----------------- | ------------- | ------------ |
 | `aspenUpdate`     | daily 07:00   | `0 7 * * *`  |
 | `flightWatch`     | hourly at :10 | `10 * * * *` |
-| `expeditionBuild` | Mondays 08:00 | `0 8 * * 1`  |
-| `expeditionWatch` | daily 09:00   | `0 9 * * *`  |
+| `expeditionBuild` | never (backlogged) | — (`/build` on demand) |
+| `expeditionWatch` | never (backlogged) | —            |
 | `noop`            | never         | —            |
 | `snapshot`        | never         | — (`/snapshot` on demand) |
+
+The weekly build and the fare watch came off the clock in the pull-model change
+(`PULL-MODEL.md` P1); their code and tables stay, and `/watch` `/unwatch` are
+built but not registered. After deploying that change, retire any live watches
+once on the droplet, from `/opt/snowbot` (the container has no sqlite CLI; see
+`deploy/README.md`):
+
+```sh
+sqlite3 data/snowbot.sqlite \
+  "UPDATE expeditions SET status = 'retired' WHERE status = 'watched';"
+```
 
 `SNOWBOT_DRY_RUN=1` turns every scheduled tick into a dry run; `SNOWBOT_CHANNEL`
 picks the channel exactly as `--channel` does. Slash commands are registered
@@ -115,18 +155,21 @@ src/
   logger.ts          JSON lines in production, readable in a terminal
   discord/client.ts  the only thing allowed to talk to Discord; enforces the post budget
   discord/anchor.ts  the self-editing pinned Aspen status message
-  discord/commands.ts  /join /airports /flight /trip /snapshot /build /watch /quiet
+  discord/commands.ts  /join /airports /flight /trip /snapshot /build /quiet (+ unregistered /watch)
   llm/client.ts      Anthropic calls with per-job usage and cost logging
   sources/_cache.ts  fetch-through cache; serves stale data rather than failing a job
   sources/weather/   ECMWF + WeatherNext + archive + seasonal → one SnowReport
                      (+ conditions.ts: temperature, wind, rain, freezing level)
   snapshot.ts        /snapshot: every spot, next 7 days, where the models agree
+  snapshotSpot.ts    /snapshot spot: — one spot, day by day
+  scout.ts           /build with no arguments — what's worth watching, no money
+  passCheck.ts       a trip window against the pass lookup: blackouts, day limits
   sources/           flights, lodging, fx, flight status, LLM web lookups
   jobs/_runner.ts    CLI parsing, job context, run ledger
   jobs/              one file per job
 scripts/             register-commands, record-fixtures, verify-board (laptop only)
 deploy/              bootstrap.sh + the runbook
-config.yaml          roster, Aspen, destination board — public by design
+config.yaml          roster, Aspen, the Ikon Base board, exclusions — public by design
 ```
 
 ## Secrets

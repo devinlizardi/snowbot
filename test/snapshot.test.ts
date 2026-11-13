@@ -19,6 +19,9 @@ import {
   type Spot,
 } from '../src/snapshot.js';
 import type { Fetched, Source } from '../src/sources/types.js';
+import { crosscheckFor } from '../src/sources/weather/crosscheck.js';
+import { checkRead, READ_MAX_CHARS, readFacts } from '../src/llm/prompts/snapshot.js';
+import { assertSpotHonest, runSpotSnapshot, spotChoices } from '../src/snapshotSpot.js';
 import type { DailyWeather, ModelForecast, Coord } from '../src/sources/weather/types.js';
 import type { WeatherNextForecast } from '../src/sources/weather/weathernext.js';
 
@@ -99,9 +102,9 @@ function wetWeathernext(coord: Coord): WeatherNextForecast {
   };
 }
 
-/** The week in the README mock: a split at Revelstoke, real snow at Banff, a dip at Zermatt. */
+/** The week in the README mock: a split at Snowbird, real snow at Banff, a dip at Zermatt. */
 const SCENARIO: Scenario = {
-  revelstoke: {
+  snowbird: {
     ecmwf_ifs025: (i) => ({ snowfallCm: i === 4 ? 2 : 0, precipitationMm: i === 4 ? 2 : 0 }),
     ecmwf_aifs025: (i) => ({ snowfallCm: i === 4 ? 3 : 0, precipitationMm: i === 4 ? 3 : 0 }),
     ncep_nam_conus: (i) => ({ snowfallCm: i === 4 ? 6 : 0, precipitationMm: i === 4 ? 5 : 0 }),
@@ -128,7 +131,7 @@ const SCENARIO: Scenario = {
       (i: number) => (i === 6 ? { precipitationMm: 9, freezingLevelM: 2300 } : {}),
     ]),
   ),
-  whistler: Object.fromEntries(
+  'big-bear': Object.fromEntries(
     (['ecmwf_ifs025', 'ecmwf_aifs025', 'ncep_nam_conus', 'gfs_seamless'] as const).map((m) => [
       m,
       (i: number) => (i === 3 ? { precipitationMm: 8, freezingLevelM: 2500 } : {}),
@@ -149,7 +152,13 @@ function fakeFetch(
       throw new Error(`${source.name} down`);
     }
     let value: unknown;
-    if (source.name === 'weathernext:bigquery') {
+    if (source.name === 'open-meteo:archive') {
+      value = {
+        coord,
+        days: [{ date: '2026-09-30', snowfallCm: 3.4 }],
+        trailing7dCm: 3.4,
+      };
+    } else if (source.name === 'weathernext:bigquery') {
       if (!opts.weathernext) throw new Error('no weathernext in this test');
       value = opts.weathernext(coord);
     } else {
@@ -193,6 +202,20 @@ describe('snapshotSpots', () => {
     expect(spots.slice(1).map((s) => s.id)).toEqual(cfg.board.map((d) => d.id));
     for (const s of spots) expect(s.label.length).toBeLessThanOrEqual(11);
   });
+
+  it('groups by display group but keeps model selection on geography', () => {
+    const niseko = spots.find((s) => s.id === 'niseko')!;
+    const chamonix = spots.find((s) => s.id === 'chamonix')!;
+    expect(niseko.group).toBe(chamonix.group);
+    expect(crosscheckFor(niseko.region).map((x) => x.name)).toEqual([
+      'open-meteo:icon_global',
+      'open-meteo:gfs_seamless',
+    ]);
+    expect(crosscheckFor(chamonix.region).map((x) => x.name)).toEqual([
+      'open-meteo:icon_eu',
+      'open-meteo:gfs_seamless',
+    ]);
+  });
 });
 
 /* ---------------------------------------------------------------- render */
@@ -204,18 +227,18 @@ describe('the message', () => {
     for (const line of block(text)) expect([...line].length).toBeLessThanOrEqual(BLOCK_MAX_COLS);
   });
 
-  it('puts Aspen first with its countdown, then the regions in board order', async () => {
+  it('puts Aspen first with its countdown, then the display groups in order', async () => {
     const { text } = await snapshotFor(SCENARIO);
     const lines = block(text);
     expect(lines[1]).toMatch(/^ASPEN · 114d\s+dry\s+2\/14\s+30 ●$/);
     const headers = lines.filter((l) => /^[A-Z]{3,} · /.test(l) && !l.startsWith('ASPEN'));
-    expect(headers.map((h) => h.split(' · ')[0])).toEqual(['JAPAN', 'CANADA', 'USA', 'EUROPE']);
+    expect(headers.map((h) => h.split(' · ')[0])).toEqual(['WEST', 'EAST', 'ROCKIES', 'ABROAD']);
   });
 
   it('shows snow as the range across the models, and the split as a callout naming them', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(rowFor(text, 'Revelstoke')).toMatch(/2–14cm .* ○$/);
-    expect(text).toContain('⚠️ **Revelstoke is a coin flip** — GFS 14cm, ECMWF 2cm.');
+    expect(rowFor(text, 'Snowbird')).toMatch(/2–14cm .* ○$/);
+    expect(text).toContain('⚠️ **Snowbird is a coin flip** — GFS 14cm, ECMWF 2cm.');
   });
 
   it('calls out the most snow the models agree on', async () => {
@@ -234,14 +257,14 @@ describe('the message', () => {
 
   it('says rain where it rains, and dry where nothing falls however warm', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(rowFor(text, 'Whistler')).toMatch(/^ Whistler\s+rain\s/);
+    expect(rowFor(text, 'Big Bear')).toMatch(/^ Big Bear\s+rain\s/);
     expect(rowFor(text, 'Niseko')).toMatch(/^ Niseko\s+dry\s/);
   });
 
-  it('labels regions from the fixed vocabulary', async () => {
+  it('labels display groups from the fixed vocabulary', async () => {
     const { text } = await snapshotFor(SCENARIO);
-    expect(block(text)).toContain('JAPAN · dry, mild');
-    expect(block(text)).toContain('CANADA · snowing, mild');
+    expect(block(text)).toContain('EAST · dry, mild');
+    expect(block(text)).toContain('ROCKIES · snow in spots, mild');
   });
 
   it('ends with the legend, the sources that answered, and when', async () => {
@@ -286,10 +309,10 @@ describe('when sources fail', () => {
 
   it('prints a dash row for a spot nothing answered for', async () => {
     const all = ['ecmwf_ifs025', 'ecmwf_aifs025', 'icon_global', 'gfs_seamless'].map(
-      (m) => `open-meteo:${m}@hakuba`,
+      (m) => `open-meteo:${m}@niseko`,
     );
     const { text } = await snapshotFor(SCENARIO, { fail: all });
-    expect(rowFor(text, 'Hakuba')).toMatch(/^ Hakuba\s+—\s+—\s+—$/);
+    expect(rowFor(text, 'Niseko')).toMatch(/^ Niseko\s+—\s+—\s+—$/);
     expect(text.split('\n')[0]).toContain('15 spots');
   });
 
@@ -387,7 +410,7 @@ describe('pickCallouts', () => {
 
   it('flags lift-holding wind', async () => {
     const windy: Scenario = {
-      jackson: Object.fromEntries(
+      'big-sky': Object.fromEntries(
         ['ecmwf_ifs025', 'ecmwf_aifs025', 'ncep_nam_conus', 'gfs_seamless'].map((m) => [
           m,
           (i: number) => (i === 3 ? { gustMaxKmh: 85 } : {}),
@@ -396,19 +419,19 @@ describe('pickCallouts', () => {
     };
     const { snapshot } = await snapshotFor(windy);
     expect(pickCallouts(snapshot.spots)).toEqual([
-      '💨 **Jackson gusts to 85 km/h Sun** — lift-hold territory.',
+      '💨 **Big Sky gusts to 85 km/h Sun** — lift-hold territory.',
     ]);
   });
 
   it('keeps at most three, most useful first', async () => {
     const busy: Scenario = {
       ...SCENARIO,
-      jackson: { gfs_seamless: (i) => (i === 3 ? { gustMaxKmh: 99 } : {}) },
+      'big-sky': { gfs_seamless: (i) => (i === 3 ? { gustMaxKmh: 99 } : {}) },
     };
     const { snapshot } = await snapshotFor(busy);
     const c = pickCallouts(snapshot.spots);
     expect(c).toHaveLength(3);
-    expect(c[0]).toMatch(/^⚠️ \*\*Revelstoke/);
+    expect(c[0]).toMatch(/^⚠️ \*\*Snowbird/);
     expect(c[1]).toMatch(/^❄️ \*\*Most snow/);
     expect(c[2]).toMatch(/^🏔️ \*\*Snow up high/);
   });
@@ -458,5 +481,209 @@ describe('pool', () => {
       ),
     );
     expect(peak).toBe(3);
+  });
+});
+
+/* ------------------------------------------------------ P5: the read */
+
+describe('the read', () => {
+  const llm = (reply: string) => ({
+    calls: [] as string[],
+    async complete(prompt: string) {
+      this.calls.push(prompt);
+      return reply;
+    },
+  });
+
+  it('goes above the table and replaces the callouts when every number checks out', async () => {
+    const read =
+      'Banff is the one getting real snow this week, 8–10cm with the models in step. ' +
+      'Snowbird is a coin flip between GFS at 14cm and ECMWF at 2cm.';
+    const w = llm(read);
+    const result = await runSnapshot(ctx(), {
+      offline: true,
+      weathernext: false,
+      fetch: fakeFetch(SCENARIO),
+      llm: w,
+    });
+    const lines = result.text.split('\n');
+    expect(lines[1]).toBe(read);
+    expect(lines[2]).toBe('```');
+    expect(result.text).not.toContain('⚠️ **Snowbird is a coin flip**');
+    expect(w.calls[0]).toContain('"Banff/LL"');
+    expect(() => assertSnapshotHonest(result.snapshot!, result.text)).not.toThrow();
+  });
+
+  it('is rejected for an invented number, and the callouts come back', async () => {
+    const result = await runSnapshot(ctx(), {
+      offline: true,
+      weathernext: false,
+      fetch: fakeFetch(SCENARIO),
+      llm: llm('Banff is getting 25cm this week.'),
+    });
+    expect(result.text).not.toContain('25cm');
+    expect(result.text).toContain('⚠️ **Snowbird is a coin flip**');
+  });
+
+  it('never lets the derived WeatherNext total through, even in the read', async () => {
+    const inputs = await gatherSnapshot(ctx(), {
+      offline: true,
+      weathernext: true,
+      fetch: fakeFetch({}, { weathernext: wetWeathernext }),
+    });
+    const snapshot = composeSnapshot(inputs);
+    const derived = Math.round(
+      snapshot.spots.find((s) => s.spot.id === 'niseko')!.snow!.derived!.totalCm,
+    );
+    const facts = readFacts(snapshot);
+    expect(JSON.stringify(facts)).not.toMatch(new RegExp(`\\b${derived}\\b`));
+    expect(checkRead(`Niseko could see ${derived}cm.`, facts).ok).toBe(false);
+  });
+
+  it('falls back when the model call throws', async () => {
+    const result = await runSnapshot(ctx(), {
+      offline: true,
+      weathernext: false,
+      fetch: fakeFetch(SCENARIO),
+      llm: {
+        complete: () => Promise.reject(new Error('cap reached')),
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain('❄️ **Most snow: Banff/LL**');
+  });
+
+  it('refuses markup, too many sentences, and anything too long', () => {
+    const facts = readFacts(composeSnapshot({ now: NOW, timezone: 'UTC', aspenWindow: { start: '2027-01-24', end: '2027-01-30' }, spots: [] }));
+    expect(checkRead('**Big** week.', facts).ok).toBe(false);
+    expect(checkRead('A. B. C. D. E.', facts).ok).toBe(false);
+    expect(checkRead('x'.repeat(500), facts).ok).toBe(false);
+    expect(checkRead('Quiet week everywhere.', facts)).toEqual({ ok: true, read: 'Quiet week everywhere.' });
+  });
+
+  it('still fits a worst-case week with a full-length read', async () => {
+    const deep = (i: number) => ({
+      snowfallCm: i > 1 ? 15 : 0,
+      precipitationMm: 12,
+      tempMinC: -28,
+      tempMaxC: -15,
+      gustMaxKmh: 140,
+      freezingLevelM: 0,
+    });
+    const huge: Scenario = Object.fromEntries(
+      spots.map((s) => [
+        s.id,
+        Object.fromEntries(
+          ['ecmwf_ifs025', 'ecmwf_aifs025', 'icon_global', 'icon_eu', 'ncep_nam_conus', 'gfs_seamless'].map(
+            (m) => [m, deep],
+          ),
+        ),
+      ]),
+    );
+    const { snapshot } = await snapshotFor(huge);
+    const read = ('Snowing everywhere. ').repeat(21).trim();
+    expect(read.length).toBeLessThanOrEqual(READ_MAX_CHARS);
+    const text = renderSnapshot(snapshot, { read });
+    expect(text.length).toBeLessThanOrEqual(DISCORD_MAX_CHARS);
+    for (const line of block(text)) expect([...line].length).toBeLessThanOrEqual(BLOCK_MAX_COLS);
+    expect(text).toContain('🔭');
+  });
+});
+
+/* --------------------------------------------------- P5: look-ahead */
+
+describe('days 8–15', () => {
+  it('names storms at least two models show, labelled low confidence', async () => {
+    const late = (cm: number) => (i: number) => (i >= 9 && i <= 10 ? { snowfallCm: cm, precipitationMm: cm } : {});
+    const scenario: Scenario = {
+      niseko: { ecmwf_ifs025: late(20), ecmwf_aifs025: late(12), gfs_seamless: late(4) },
+      chamonix: { ecmwf_ifs025: late(20) }, // one model alone: not a signal
+    };
+    const { snapshot, text } = await snapshotFor(scenario);
+    expect(snapshot.lookAhead.map((x) => x.spot.id)).toEqual(['niseko']);
+    expect(text).toContain('🔭 **Days 8–15, low confidence:** Niseko 0–40cm — models starting to line up.');
+    expect(() => assertSnapshotHonest(snapshot, text)).not.toThrow();
+  });
+
+  it('says so when nothing is lining up', async () => {
+    const { text } = await snapshotFor({});
+    expect(text).toContain('🔭 **Days 8–15:** nothing the models agree on yet.');
+  });
+});
+
+/* ------------------------------------------------------ P5: region: */
+
+describe('region filter', () => {
+  it('keeps Aspen first and only that group', async () => {
+    const result = await runSnapshot(ctx(), {
+      offline: true,
+      weathernext: false,
+      fetch: fakeFetch(SCENARIO),
+      group: 'EAST',
+    });
+    const lines = block(result.text);
+    expect(lines[1]).toMatch(/^ASPEN/);
+    expect(lines.filter((l) => / · /.test(l)).map((l) => l.split(' · ')[0])).toEqual(['ASPEN', 'EAST']);
+    expect(result.text.split('\n')[0]).toContain('4 spots');
+  });
+});
+
+/* ------------------------------------------------------- P5: spot: */
+
+describe('spot drill-down', () => {
+  it('renders for every spot on the board, from fixtures, inside the limits', async () => {
+    for (const s of spots) {
+      const r = await runSpotSnapshot(ctx(), s.id, { offline: true, weathernext: false, fetch: fakeFetch(SCENARIO) });
+      expect(r.ok, s.id).toBe(true);
+      expect(r.text.length).toBeLessThanOrEqual(DISCORD_MAX_CHARS);
+      const rows = block(r.text);
+      expect(rows).toHaveLength(8); // header + 7 days
+      for (const line of rows) expect([...line].length, `${s.id}: ${line}`).toBeLessThanOrEqual(BLOCK_MAX_COLS);
+      expect(r.text).toContain('**Fell last 7 days:** 3cm');
+    }
+  });
+
+  it('shows per-model totals, the freezing level against the summit, and the split', async () => {
+    const r = await runSpotSnapshot(ctx(), 'snowbird', { offline: true, weathernext: false, fetch: fakeFetch(SCENARIO) });
+    expect(r.text.split('\n')[0]).toBe('❄️ **Snowbird** · next 7 days · ○ models split');
+    expect(r.text).toContain('**7-day totals:** GFS 14cm · NAM 6cm · AIFS 3cm · ECMWF 2cm');
+    expect(r.text).toMatch(/\*\*Freezing level:\*\* lowest 3,900m \w{3}, above the 3,400m summit all week\./);
+    expect(rowFor(r.text, 'Mon 05')).toMatch(/^Mon 05\s+2–14cm/);
+    expect(r.text).toContain('**WeatherNext:** not in this report.');
+  });
+
+  it('adds the pass line only when the lookup has answered', async () => {
+    const base = { offline: true, weathernext: false, fetch: fakeFetch(SCENARIO) };
+    const none = await runSpotSnapshot(ctx(), 'killington', base);
+    expect(none.text).not.toContain('🎟️');
+    const withPass = await runSpotSnapshot(ctx(), 'killington', {
+      ...base,
+      passAccess: { onPass: true, daysLimit: 5, blackouts: [], notes: 'Shared with Pico' },
+    });
+    expect(withPass.text).toContain('🎟️ Ikon Base Pass: 5 days (Shared with Pico), no blackouts in these dates.');
+  });
+
+  it("never prints WeatherNext's derived total", async () => {
+    const r = await runSpotSnapshot(ctx(), 'niseko', {
+      offline: true,
+      weathernext: true,
+      fetch: fakeFetch({}, { weathernext: wetWeathernext }),
+    });
+    const derived = Math.round(r.detail!.row.snow!.derived!.totalCm);
+    expect(derived).toBeGreaterThan(50);
+    expect(r.text).not.toMatch(new RegExp(`\\b${derived}\\b`));
+    expect(r.text).toMatch(/\*\*WeatherNext:\*\* /);
+    expect(() => assertSpotHonest(r.detail!, `${r.text}\n${derived}cm`)).toThrow(/which no model/);
+  });
+
+  it('says plainly when the spot is unknown', async () => {
+    const r = await runSpotSnapshot(ctx(), 'revelstoke', { offline: true, fetch: fakeFetch(SCENARIO) });
+    expect(r).toMatchObject({ ok: false, detail: null });
+  });
+
+  it('autocompletes from Aspen and the board', () => {
+    expect(spotChoices(cfg, '')).toHaveLength(16);
+    expect(spotChoices(cfg, 'mamm')).toEqual([{ name: 'Mammoth Mountain', value: 'mammoth' }]);
+    expect(spotChoices(cfg, 'asp')[0]).toEqual({ name: 'Aspen (Snowmass)', value: 'aspen' });
   });
 });

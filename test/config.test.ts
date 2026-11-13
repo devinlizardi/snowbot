@@ -80,6 +80,44 @@ describe('loadConfig', () => {
     expect(new Set(cfg.board.map((d) => d.id)).size).toBe(cfg.board.length);
   });
 
+  it('board v3: 15 Ikon Base spots in four display groups, Revelstoke excluded with a reason', () => {
+    const cfg = loadConfig({ env: {} });
+    expect(cfg.board).toHaveLength(15);
+    const groups = (g: string) => cfg.board.filter((d) => d.group === g).map((d) => d.id);
+    expect(groups('WEST')).toEqual(['big-bear', 'mammoth', 'palisades']);
+    expect(groups('EAST')).toEqual(['killington', 'stratton', 'sugarbush']);
+    expect(groups('ROCKIES')).toEqual([
+      'winter-park',
+      'steamboat',
+      'solitude',
+      'snowbird',
+      'big-sky',
+    ]);
+    expect(groups('ABROAD')).toEqual(['niseko', 'banff', 'chamonix', 'zermatt']);
+    expect(cfg.excluded).toEqual([{ id: 'revelstoke', reason: expect.stringMatching(/went/) }]);
+    expect(cfg.group.pass).toBe('ikon_base');
+    // Pass facts never live in config: every entry still needs the live lookup.
+    for (const d of cfg.board) expect(d.pass_verify).toBe(true);
+  });
+
+  it('keeps geography (region) separate from the display group', () => {
+    const cfg = loadConfig({ env: {} });
+    const by = (id: string) => cfg.board.find((d) => d.id === id)!;
+    // Same display group, different cross-check models.
+    expect(by('niseko')).toMatchObject({ group: 'ABROAD', region: 'JP' });
+    expect(by('chamonix')).toMatchObject({ group: 'ABROAD', region: 'EU' });
+    expect(by('banff')).toMatchObject({ group: 'ABROAD', region: 'CA' });
+  });
+
+  it('refuses an excluded id that is also on the board', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'snowbot-cfg-'));
+    const local = join(dir, 'config.local.yaml');
+    writeFileSync(local, 'excluded:\n  - id: niseko\n    reason: test\n');
+    expect(() => loadConfig({ localPath: local, env: {} })).toThrow(
+      /niseko is excluded \(test\) but is also on the board/,
+    );
+  });
+
   it('applies config.local.yaml over the base file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'snowbot-cfg-'));
     const local = join(dir, 'config.local.yaml');

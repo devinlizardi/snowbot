@@ -1,5 +1,8 @@
 import {
+  ActionRowBuilder,
   ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
   REST,
   Routes,
@@ -7,7 +10,7 @@ import {
   type ChatInputCommandInteraction,
   type Client,
 } from 'discord.js';
-import type { Config } from '../config.js';
+import { DISPLAY_GROUPS, type Config, type DisplayGroup } from '../config.js';
 import type { ChannelTarget } from './client.js';
 import { kvGet, kvSet, type DB } from '../db.js';
 import { log } from '../logger.js';
@@ -33,7 +36,10 @@ export type CommandContext = {
 };
 
 export type CommandAction =
-  { kind: 'build'; destination?: string; month?: string } | { kind: 'trip' } | { kind: 'snapshot' };
+  | { kind: 'build'; destination: string; month?: string; window?: { start: string; end: string } }
+  | { kind: 'scout' }
+  | { kind: 'trip' }
+  | { kind: 'snapshot'; spot?: string; group?: DisplayGroup };
 
 export type CommandResult = {
   reply: string;
@@ -118,29 +124,34 @@ export const COMMANDS = [
     )
     .addBooleanOption((o) =>
       o.setName('private').setDescription('Only you see the reply').setRequired(false),
+    )
+    .addStringOption((o) =>
+      o
+        .setName('spot')
+        .setDescription('One spot, day by day')
+        .setRequired(false)
+        .setAutocomplete(true),
+    )
+    .addStringOption((o) =>
+      o
+        .setName('region')
+        .setDescription('Only one group of spots')
+        .setRequired(false)
+        .addChoices(...DISPLAY_GROUPS.map((g) => ({ name: g, value: g }))),
     ),
 
   new SlashCommandBuilder()
     .setName('build')
-    .setDescription('Force an expedition build')
+    .setDescription("What's worth watching — or, with a destination, price a trip there")
     .addStringOption((o) =>
-      o.setName('destination').setDescription('Board id, e.g. niseko').setRequired(false),
+      o.setName('destination').setDescription('Board id to price, e.g. mammoth').setRequired(false),
     )
     .addStringOption((o) =>
-      o.setName('month').setDescription('Target month, YYYY-MM').setRequired(false),
+      o.setName('month').setDescription('Month to price, YYYY-MM').setRequired(false),
+    )
+    .addBooleanOption((o) =>
+      o.setName('private').setDescription('Only you see the reply').setRequired(false),
     ),
-
-  new SlashCommandBuilder()
-    .setName('watch')
-    .setDescription('Start daily fare tracking for an expedition')
-    .addStringOption((o) =>
-      o.setName('id').setDescription('Expedition id from the dossier').setRequired(true),
-    ),
-
-  new SlashCommandBuilder()
-    .setName('unwatch')
-    .setDescription('Stop tracking an expedition')
-    .addStringOption((o) => o.setName('id').setDescription('Expedition id').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('quiet')
@@ -153,6 +164,25 @@ export const COMMANDS = [
         .setMinValue(1)
         .setMaxValue(QUIET_MAX_DAYS),
     ),
+];
+
+/**
+ * Built and tested but not registered with Discord (PULL-MODEL.md P1): fare
+ * watching is backlogged along with the weekly build. The handlers below still
+ * answer them, so putting them back is one line in `COMMANDS`.
+ */
+export const BACKLOGGED_COMMANDS = [
+  new SlashCommandBuilder()
+    .setName('watch')
+    .setDescription('Start daily fare tracking for an expedition')
+    .addStringOption((o) =>
+      o.setName('id').setDescription('Expedition id from the dossier').setRequired(true),
+    ),
+
+  new SlashCommandBuilder()
+    .setName('unwatch')
+    .setDescription('Stop tracking an expedition')
+    .addStringOption((o) => o.setName('id').setDescription('Expedition id').setRequired(true)),
 ];
 
 /* --------------------------------------------------------------- helpers */
@@ -408,9 +438,17 @@ function trip(ctx: CommandContext): CommandResult {
  * and `/quiet` doesn't hold it back. Public by default, since people mostly
  * want to show the group; `private:true` makes it ephemeral.
  */
-function snapshot(opts: CommandOpts): CommandResult {
-  return ok('Pulling every forecast for every spot…', {
-    action: { kind: 'snapshot' },
+function snapshot(opts: CommandOpts, ctx: CommandContext): CommandResult {
+  const spot = str(opts, 'spot')?.toLowerCase() || undefined;
+  const region = str(opts, 'region')?.toUpperCase() || undefined;
+  if (spot && spot !== 'aspen' && !ctx.cfg.board.some((d) => d.id === spot)) {
+    const ids = ['aspen', ...ctx.cfg.board.map((d) => d.id)].join(', ');
+    return oops(`"${spot}" isn't a spot the bot tracks. Try one of: ${ids}.`);
+  }
+  const group = DISPLAY_GROUPS.find((g) => g === region);
+  if (region && !group) return oops(`Region should be one of ${DISPLAY_GROUPS.join(', ')}.`);
+  return ok(spot ? `Pulling every forecast for ${spot}…` : 'Pulling every forecast for every spot…', {
+    action: { kind: 'snapshot', ...(spot ? { spot } : {}), ...(group && !spot ? { group } : {}) },
     ...(opts.private === true ? { ephemeral: true } : {}),
   });
 }
@@ -418,14 +456,22 @@ function snapshot(opts: CommandOpts): CommandResult {
 function build(opts: CommandOpts, ctx: CommandContext): CommandResult {
   const destination = str(opts, 'destination')?.toLowerCase() || undefined;
   const month = str(opts, 'month') || undefined;
+  const excluded = destination ? ctx.cfg.excluded.find((x) => x.id === destination) : undefined;
+  if (excluded) return oops(`${excluded.id} is off the board on purpose: ${excluded.reason}.`);
   if (destination && !ctx.cfg.board.some((d) => d.id === destination)) {
     const ids = ctx.cfg.board.map((d) => d.id).join(', ');
     return oops(`"${destination}" isn't on the board. Try one of: ${ids}.`);
   }
   if (month && !ISO_MONTH.test(month)) return oops(`Month should be YYYY-MM, not "${month}".`);
-  const what = destination ? `a ${destination} plan` : 'the best plan on the board';
-  return ok(`Building ${what}${month ? ` for ${month}` : ''} — this takes a few minutes.`, {
-    action: { kind: 'build', ...(destination ? { destination } : {}), ...(month ? { month } : {}) },
+  const priv = opts.private === true ? { ephemeral: true } : {};
+  if (!destination) {
+    if (month) return oops('Pick a `destination` to price a month — `/build` alone shows what to watch.');
+    // No arguments: the weather-only scout view. No money, no SerpApi.
+    return ok("Looking at what's worth watching…", { action: { kind: 'scout' }, ...priv });
+  }
+  return ok(`Pricing ${destination}${month ? ` for ${month}` : ''} — this takes a few minutes.`, {
+    action: { kind: 'build', destination, ...(month ? { month } : {}) },
+    ...priv,
   });
 }
 
@@ -440,8 +486,7 @@ function setWatch(
   const row = ctx.db
     .prepare('SELECT id, destination, status, channel_target FROM expeditions WHERE id = ?')
     .get(id) as
-    | { id: string; destination: string; status: string; channel_target: ChannelTarget }
-    | undefined;
+    { id: string; destination: string; status: string; channel_target: ChannelTarget } | undefined;
   if (!row) return oops(`No expedition called "${id}".`);
   if (ctx.target && row.channel_target !== ctx.target) {
     return oops(`${id} was posted in the ${row.channel_target} channel — (un)watch it there.`);
@@ -492,7 +537,7 @@ export async function handle(
     case 'trip':
       return trip(ctx);
     case 'snapshot':
-      return snapshot(opts);
+      return snapshot(opts, ctx);
     case 'build':
       return build(opts, ctx);
     case 'watch':
@@ -527,12 +572,22 @@ export async function registerCommands(args: {
 
 /* ------------------------------------------------------ discord plumbing */
 
+/** What an action resolves to: plain text, or text with 💲 buttons under it. */
+export type ActionReply =
+  | string
+  | { content: string; buttons?: { customId: string; label: string }[] }
+  | undefined;
+
 export type InteractionDeps = {
   db: DB;
   cfg: Config;
+  /** Autocomplete answers, by option name; e.g. `spot` → spotChoices. */
+  autocomplete?: (option: string, typed: string) => { name: string; value: string }[];
   target?: ChannelTarget;
   /** Runs the returned action; whatever it resolves to replaces the reply. */
-  onAction?: (action: CommandAction, ctx: CommandContext) => Promise<string | undefined>;
+  onAction?: (action: CommandAction, ctx: CommandContext) => Promise<ActionReply>;
+  /** Turns a button's custom_id into an action (💲 Price it), or null to ignore it. */
+  onButton?: (customId: string) => CommandAction | null;
   now?: () => Date;
 };
 
@@ -563,6 +618,27 @@ function optionsOf(interaction: ChatInputCommandInteraction): {
 
 export function attachInteractionHandler(client: Client, deps: InteractionDeps): void {
   client.on('interactionCreate', async (interaction) => {
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused(true);
+      const choices = deps.autocomplete?.(focused.name, String(focused.value)) ?? [];
+      await interaction.respond(choices.slice(0, 25)).catch((err: unknown) => {
+        log.warn('autocomplete failed', { error: String(err) });
+      });
+      return;
+    }
+    if (interaction.isButton()) {
+      const action = deps.onButton?.(interaction.customId) ?? null;
+      if (!action || !deps.onAction) return;
+      const ctx = contextFor(deps, interaction.user.id, interaction.user.displayName, interaction.member);
+      try {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.editReply(toMessage(await deps.onAction(action, ctx), 'Done.'));
+      } catch (err) {
+        log.error('button failed', { customId: interaction.customId, error: String(err) });
+        await interaction.editReply('Something broke handling that — check the logs.').catch(() => {});
+      }
+      return;
+    }
     if (!interaction.isChatInputCommand()) return;
     const ctx: CommandContext = {
       db: deps.db,
@@ -585,7 +661,7 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
         // Builds take minutes; acknowledge now, edit the reply when done.
         await interaction.deferReply(flags ? { flags } : {});
         const out = await deps.onAction(result.action, ctx);
-        await interaction.editReply(out ?? result.reply);
+        await interaction.editReply(toMessage(out, result.reply));
       } else {
         await interaction.reply(
           flags ? { content: result.reply, flags } : { content: result.reply },
@@ -599,4 +675,47 @@ export function attachInteractionHandler(client: Client, deps: InteractionDeps):
       else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   });
+}
+
+function contextFor(
+  deps: InteractionDeps,
+  userId: string,
+  fallbackName: string,
+  member: unknown,
+): CommandContext {
+  return {
+    db: deps.db,
+    cfg: deps.cfg,
+    now: deps.now ? deps.now() : new Date(),
+    ...(deps.target ? { target: deps.target } : {}),
+    user: {
+      id: userId,
+      name:
+        member && typeof member === 'object' && 'displayName' in member
+          ? String((member as { displayName: unknown }).displayName)
+          : fallbackName,
+    },
+  };
+}
+
+/** An action's reply as a Discord edit: content, plus a row of buttons when there are any. */
+export function toMessage(
+  out: ActionReply,
+  fallback: string,
+): { content: string; components: ActionRowBuilder<ButtonBuilder>[] } {
+  if (out === undefined) return { content: fallback, components: [] };
+  if (typeof out === 'string') return { content: out, components: [] };
+  const buttons = (out.buttons ?? []).slice(0, 5);
+  return {
+    content: out.content,
+    components: buttons.length
+      ? [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            buttons.map((b) =>
+              new ButtonBuilder().setCustomId(b.customId).setLabel(b.label).setStyle(ButtonStyle.Secondary),
+            ),
+          ),
+        ]
+      : [],
+  };
 }

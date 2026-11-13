@@ -21,8 +21,10 @@ export const TIMEZONE = 'America/New_York';
 export const SCHEDULE: Readonly<Record<string, string | null>> = {
   aspenUpdate: '0 7 * * *', // daily 07:00 — before anyone checks Discord over coffee
   flightWatch: '10 * * * *', // hourly at :10; the job itself decides if a window is open
-  expeditionBuild: '0 8 * * 1', // Mondays 08:00 — one root post a week, per PLAN §2
-  expeditionWatch: '0 9 * * *', // daily 09:00, after the build has had its say
+  // Backlogged by PULL-MODEL.md P1: discovery is on demand (/build, /snapshot)
+  // now. Both jobs stay in JOBS, so `pnpm dev -- job=<name>` still runs them.
+  expeditionBuild: null, // was '0 8 * * 1' (Mondays 08:00)
+  expeditionWatch: null, // was '0 9 * * *' (daily 09:00)
   noop: null, // manual health check only
 };
 

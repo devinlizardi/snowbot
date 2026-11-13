@@ -64,7 +64,7 @@ describe('scoreDestination', () => {
   });
 
   it('weights every term as PLAN §5 (Sept 2026) says', () => {
-    const i = input(by('whistler'), {
+    const i = input(by('banff'), {
       cm: 50,
       conf: 'high',
       observed7dCm: 35,
@@ -85,7 +85,7 @@ describe('scoreDestination', () => {
 
   it('a snowy window beats a fresh storm somewhere that is usually dry then', () => {
     const reliable = scoreDestination(input(by('niseko'), { cm: 10, conf: 'low', historical: 0.95 }), W);
-    const lucky = scoreDestination(input(by('whistler'), { cm: 90, conf: 'high', historical: 0.3 }), W);
+    const lucky = scoreDestination(input(by('banff'), { cm: 90, conf: 'high', historical: 0.3 }), W);
     expect(reliable).toBeGreaterThan(lucky);
   });
 });
@@ -105,11 +105,11 @@ describe('historicalScore', () => {
   });
 
   it('clips a cost above the ceiling to zero rather than going negative', () => {
-    const cheap = input(by('jackson'), { estCostPp: 1000, ceilingUsd: 1400 });
-    const pricey = input(by('jackson'), { estCostPp: 3000, ceilingUsd: 1400 });
+    const cheap = input(by('big-sky'), { estCostPp: 1000, ceilingUsd: 1400 });
+    const pricey = input(by('big-sky'), { estCostPp: 3000, ceilingUsd: 1400 });
     expect(scoreDestination(pricey, W)).toBeLessThan(scoreDestination(cheap, W));
     expect(scoreDestination(pricey, W)).toBeCloseTo(
-      scoreDestination(input(by('jackson'), { estCostPp: 1400, ceilingUsd: 1400 }), W),
+      scoreDestination(input(by('big-sky'), { estCostPp: 1400, ceilingUsd: 1400 }), W),
       6,
     );
   });
@@ -117,19 +117,23 @@ describe('historicalScore', () => {
 
 describe('logisticsEaseFor / estimateCostForRanking', () => {
   it.each([
-    ['whistler', 0.9], // coach
+    ['banff', 0.9], // airporter coach
     ['zermatt', 0.9], // train
-    ['jackson', 0.9], // shuttle
-    ['revelstoke', 0.6], // rental car
-    ['nozawa', 0.5], // shinkansen + bus
+    ['big-sky', 0.9], // shuttle
+    ['solitude', 0.6], // rental car
+    ['killington', 0.6], // drive
   ])('%s → %s', (id, ease) => {
     expect(logisticsEaseFor(by(id))).toBe(ease);
+  });
+
+  it('marks a multi-leg journey as the hardest', () => {
+    expect(logisticsEaseFor({ ground: 'Shinkansen to Iiyama + bus' })).toBe(0.5);
   });
 
   it('is the lodging band midpoint for the ideal trip plus the regional prior', () => {
     // Niseko: (110+160)/2 × 9 nights + JP prior.
     expect(estimateCostForRanking(by('niseko'))).toBe(135 * 9 + AIRFARE_PRIOR_USD.JP);
-    expect(estimateCostForRanking(by('jackson'))).toBe(180 * 5 + AIRFARE_PRIOR_USD.US);
+    expect(estimateCostForRanking(by('big-sky'))).toBe(165 * 4 + AIRFARE_PRIOR_USD.US);
   });
 });
 
@@ -140,14 +144,14 @@ describe('rankBoard', () => {
     const r = rankBoard(
       [
         input(by('niseko'), { cm: 90, conf: 'high' }),
-        input(by('whistler'), { cm: 30, conf: 'medium' }),
-        input(by('jackson'), { cm: 10, conf: 'low' }),
+        input(by('banff'), { cm: 30, conf: 'medium' }),
+        input(by('big-sky'), { cm: 10, conf: 'low' }),
       ],
       cfg,
       [],
       NOW,
     );
-    expect(r.ranked.map((x) => x.dest.id)).toEqual(['niseko', 'whistler', 'jackson']);
+    expect(r.ranked.map((x) => x.dest.id)).toEqual(['niseko', 'banff', 'big-sky']);
     expect(r.ranked[0]!.reasons).toContain('90cm forecast over 10 days, high confidence');
     expect(r.ranked[0]!.reasons[0]).toBe('no snow history');
     expect(r.nearMisses).toEqual([]);
@@ -155,15 +159,15 @@ describe('rankBoard', () => {
 
   it('excludes a destination built 2 weeks ago and admits one built 5 weeks ago', () => {
     const r = rankBoard(
-      [input(by('niseko'), { cm: 90, conf: 'high' }), input(by('whistler'))],
+      [input(by('niseko'), { cm: 90, conf: 'high' }), input(by('banff'))],
       cfg,
       [
         { destination: 'niseko', createdAt: weeksAgo(2) },
-        { destination: 'whistler', createdAt: weeksAgo(5) },
+        { destination: 'banff', createdAt: weeksAgo(5) },
       ],
       NOW,
     );
-    expect(r.ranked.map((x) => x.dest.id)).toEqual(['whistler']);
+    expect(r.ranked.map((x) => x.dest.id)).toEqual(['banff']);
     expect(r.cooledDown.map((c) => c.dest.id)).toEqual(['niseko']);
   });
 
@@ -186,10 +190,10 @@ describe('rankBoard', () => {
   it('returns anything over the ceiling as a near miss, and ignores the ceiling when told to', () => {
     const cands = [
       input(by('niseko'), { estCostPp: 2900 }),
-      input(by('jackson'), { estCostPp: 1200 }),
+      input(by('big-sky'), { estCostPp: 1200 }),
     ];
     const r = rankBoard(cands, cfg, [], NOW);
-    expect(r.ranked.map((x) => x.dest.id)).toEqual(['jackson']);
+    expect(r.ranked.map((x) => x.dest.id)).toEqual(['big-sky']);
     expect(r.nearMisses).toHaveLength(1);
     expect(r.nearMisses[0]).toMatchObject({ estCostPp: 2900, ceilingUsd: 2600 });
     expect(r.nearMisses[0]!.reason).toMatch(/\$2900\/pp over the \$2600 ceiling/);

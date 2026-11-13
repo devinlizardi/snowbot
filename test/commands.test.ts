@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type Config } from '../src/config.js';
 import { kvGet, openDb, type DB } from '../src/db.js';
-import { COMMANDS, handle, isQuiet, type CommandContext } from '../src/discord/commands.js';
+import {
+  BACKLOGGED_COMMANDS,
+  COMMANDS,
+  handle,
+  isQuiet,
+  toMessage,
+  type CommandContext,
+} from '../src/discord/commands.js';
 
 let db: DB;
 let cfg: Config;
@@ -41,20 +48,15 @@ const airportsOf = (discordId: string): string[] =>
   ) as string[];
 
 describe('definitions', () => {
-  it('declares every command PLAN.md §1C lists', () => {
+  it('registers every live command, and not /watch or /unwatch (PULL-MODEL P1)', () => {
     const names = COMMANDS.map((c) => c.name).sort();
-    expect(names).toEqual([
-      'airports',
-      'build',
-      'flight',
-      'join',
-      'quiet',
-      'snapshot',
-      'trip',
-      'unwatch',
-      'watch',
-    ]);
+    expect(names).toEqual(['airports', 'build', 'flight', 'join', 'quiet', 'snapshot', 'trip']);
     for (const c of COMMANDS) expect(() => c.toJSON()).not.toThrow();
+  });
+
+  it('keeps /watch and /unwatch built but unregistered', () => {
+    expect(BACKLOGGED_COMMANDS.map((c) => c.name).sort()).toEqual(['unwatch', 'watch']);
+    for (const c of BACKLOGGED_COMMANDS) expect(() => c.toJSON()).not.toThrow();
   });
 });
 
@@ -226,13 +228,9 @@ describe('/watch and /unwatch', () => {
     insertExpedition('old', 'retired');
     insertExpedition('w', 'watched');
     expect((await handle('watch', null, { id: 'nope' }, m1())).reply).toMatch(/No expedition/);
-    expect((await handle('watch', null, { id: 'old' }, m1())).reply).toMatch(
-      /window has passed/,
-    );
+    expect((await handle('watch', null, { id: 'old' }, m1())).reply).toMatch(/window has passed/);
     expect((await handle('watch', null, { id: 'w' }, m1())).reply).toMatch(/already watched/);
-    expect((await handle('unwatch', null, { id: 'old' }, m1())).reply).toMatch(
-      /window has passed/,
-    );
+    expect((await handle('unwatch', null, { id: 'old' }, m1())).reply).toMatch(/window has passed/);
     expect(status('old')).toBe('retired');
     expect(status('w')).toBe('watched');
   });
@@ -282,9 +280,31 @@ describe('/build', () => {
     expect(r.ephemeral).toBeFalsy();
   });
 
-  it('omits options that were not given', async () => {
+  it('with no arguments, scouts instead of pricing (PULL-MODEL P6)', async () => {
     const r = await handle('build', null, {}, m1());
-    expect(r.action).toEqual({ kind: 'build' });
+    expect(r.action).toEqual({ kind: 'scout' });
+    expect(r.ephemeral).toBeFalsy();
+    expect((await handle('build', null, { private: true }, m1())).ephemeral).toBe(true);
+  });
+
+  it('wants a destination before it prices a month', async () => {
+    const r = await handle('build', null, { month: '2027-02' }, m1());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/Pick a `destination`/);
+  });
+
+  it('turns an action reply with buttons into one row of Discord buttons', () => {
+    const m = toMessage(
+      { content: 'x', buttons: [{ customId: 'price:mammoth:2026-11-20:2026-11-22', label: '💲 Price Mammoth' }] },
+      'fallback',
+    );
+    expect(m.content).toBe('x');
+    const row = m.components[0]!.toJSON();
+    expect(row.components).toEqual([
+      expect.objectContaining({ custom_id: 'price:mammoth:2026-11-20:2026-11-22', label: '💲 Price Mammoth' }),
+    ]);
+    expect(toMessage('plain', 'f')).toEqual({ content: 'plain', components: [] });
+    expect(toMessage(undefined, 'f').content).toBe('f');
   });
 
   it('rejects an unknown destination or a malformed month without an action', async () => {
@@ -294,6 +314,12 @@ describe('/build', () => {
     const badMonth = await handle('build', null, { month: 'Feb' }, m1());
     expect(badMonth.action).toBeUndefined();
     expect(badMonth.reply).toMatch(/YYYY-MM/);
+  });
+
+  it('says why an excluded spot is off the board', async () => {
+    const r = await handle('build', null, { destination: 'revelstoke' }, m1());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/revelstoke is off the board on purpose: the group went/);
   });
 });
 
@@ -331,11 +357,39 @@ describe('/snapshot', () => {
     ).toBeUndefined();
   });
 
-  it('declares private as a real boolean option', () => {
+  it('declares private, spot (autocomplete) and region (choices) options', () => {
     const def = COMMANDS.find((c) => c.name === 'snapshot')!.toJSON();
     expect(def.options).toEqual([
       expect.objectContaining({ name: 'private', type: 5, required: false }),
+      expect.objectContaining({ name: 'spot', type: 3, required: false, autocomplete: true }),
+      expect.objectContaining({
+        name: 'region',
+        type: 3,
+        required: false,
+        choices: ['WEST', 'EAST', 'ROCKIES', 'ABROAD'].map((g) => ({ name: g, value: g })),
+      }),
     ]);
+  });
+
+  it('passes a known spot, or a region, through to the action', async () => {
+    expect((await handle('snapshot', null, { spot: 'Mammoth' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      spot: 'mammoth',
+    });
+    expect((await handle('snapshot', null, { spot: 'aspen' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      spot: 'aspen',
+    });
+    expect((await handle('snapshot', null, { region: 'east' }, stranger())).action).toEqual({
+      kind: 'snapshot',
+      group: 'EAST',
+    });
+  });
+
+  it('refuses a spot that is not tracked', async () => {
+    const r = await handle('snapshot', null, { spot: 'revelstoke' }, stranger());
+    expect(r.action).toBeUndefined();
+    expect(r.reply).toMatch(/isn't a spot the bot tracks/);
   });
 });
 

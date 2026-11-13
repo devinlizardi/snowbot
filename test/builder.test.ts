@@ -22,7 +22,28 @@ import type { DailyWeather, ModelForecast } from '../src/sources/weather/types.j
 const cfg = loadConfig({ env: {} });
 const NOW = new Date('2026-09-14T12:00:00Z');
 const niseko: Destination = cfg.board.find((d) => d.id === 'niseko')!;
-const revelstoke: Destination = cfg.board.find((d) => d.id === 'revelstoke')!;
+/**
+ * Revelstoke is off the board (excluded: the group went in 25/26), but it is
+ * still the right fixture for Packet 12's Canada case — a 7-day trip, a rental
+ * car, the international ceiling — so it lives here as a test-only entry.
+ */
+const revelstoke: Destination = {
+  id: 'revelstoke',
+  name: 'Revelstoke',
+  region: 'CA',
+  group: 'ABROAD',
+  lat: 50.9583,
+  lon: -118.1637,
+  base_elevation_m: 512,
+  summit_elevation_m: 2225,
+  airport: 'YLW',
+  ground: 'Rental car YLW -> Revelstoke (~2.5h)',
+  lodging_band_usd_pp_night: [100, 160],
+  min_days: 5,
+  ideal_days: 7,
+  pass_verify: true,
+  pitch: { hook: '', terrain: [], off_snow: [], heads_up: [] },
+};
 
 /* ------------------------------------------------------------ fixtures */
 
@@ -404,11 +425,11 @@ describe('buildExpedition — Revelstoke (CA, 7 days)', () => {
   });
 
   it('uses the domestic ceiling for a US destination', () => {
-    const jackson = cfg.board.find((d) => d.id === 'jackson')!;
-    const inputs = revelstokeInputs({ dest: jackson });
+    const bigSky = cfg.board.find((d) => d.id === 'big-sky')!;
+    const inputs = revelstokeInputs({ dest: bigSky });
     const e2 = buildExpedition(inputs, cfg, NOW);
     expect(e2.cost.ceilingUsd).toBe(cfg.expedition.ceiling_usd.domestic);
-    expect(e2.id).toBe('jackson-0213');
+    expect(e2.id).toBe('big-sky-0213');
   });
 
   it('decides by three weeks out when the window is close', () => {

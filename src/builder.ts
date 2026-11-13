@@ -256,10 +256,27 @@ export function expeditionId(dest: Destination, window: DateWindow): string {
 
 /* -------------------------------------------------------------- quote */
 
-/** The destination's own quote; otherwise a pool quote picked stably by expedition id. */
-export function quoteFor(dest: Destination, cfg: Config, id: string): Quote | null {
-  if (dest.pitch.quote) return dest.pitch.quote;
-  const pool = cfg.expedition.quote_pool;
+/** A quote that went out under another expedition's header recently. */
+export type RecentQuote = { id: string; text: string };
+
+/**
+ * The destination's own quote; otherwise a pool quote picked stably by
+ * expedition id. Anything another expedition used recently is skipped — with
+ * a two-quote pool, a stable pick alone collided half the time (Whistler and
+ * Revelstoke both got Muir, Oct 2026). A rebuild of the same expedition keeps
+ * its quote. When nothing fresh is left there is no quote: no quote beats a
+ * repeat.
+ */
+export function quoteFor(
+  dest: Destination,
+  cfg: Config,
+  id: string,
+  recent: readonly RecentQuote[] = [],
+): Quote | null {
+  const used = new Set(recent.filter((r) => r.id !== id).map((r) => r.text));
+  const own = dest.pitch.quote;
+  if (own && !used.has(own.text)) return own;
+  const pool = cfg.expedition.quote_pool.filter((q) => !used.has(q.text));
   if (pool.length === 0) return null;
   let h = 0;
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
