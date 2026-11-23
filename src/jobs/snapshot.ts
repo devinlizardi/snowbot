@@ -17,7 +17,9 @@ export const snapshotJob: Job = {
     const offline = ctx.dryRun && !optionalSecret('OPEN_METEO_LIVE');
     if (offline) ctx.log.warn('dry run without OPEN_METEO_LIVE — serving cache only');
     if (!ctx.dryRun) ctx.log.info('snapshot is reply-only — printing, not posting');
-    const result = await runSnapshot(ctx, { offline });
+    const llm = optionalSecret('ANTHROPIC_API_KEY') ? ctx.llm : null;
+    if (!llm) ctx.log.info('no ANTHROPIC_API_KEY — the read falls back to the templated callouts');
+    const result = await runSnapshot(ctx, { offline, llm });
     console.log(`\n${result.text}\n\n(${result.text.length} chars)\n`);
   },
 };

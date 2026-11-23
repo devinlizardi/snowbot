@@ -43,6 +43,15 @@ Everything posts to **the one existing channel.** Not flooding it is a hard desi
 - **Flight watch**: all five flights checked at T-24h and T-3h, reported as **one combined message**, never one per person.
 
 ### B. The Expedition Builder
+
+> **Superseded by [`PULL-MODEL.md`](PULL-MODEL.md) (Oct 12, 2026).** The weekly
+> build and the fare watch are **backlogged**: their code and tables stay, but
+> they are off the clock and `/watch` is unregistered. Discovery is on demand —
+> `/snapshot` for the weather and `/build` for "what's worth watching", with
+> pricing only behind 💲 Price it — and the dossier no longer carries a
+> decide-by date. The board is rebuilt around the Ikon Base Pass. What follows
+> is the original design, kept for reference.
+
 Weekly, the bot picks the single best destination on the board and **builds the whole trip**, then posts one dossier:
 
 > **🇯🇵 NISEKO — Feb 12–20 — $2,340/person — 9 days (7 on snow)**
@@ -67,13 +76,17 @@ The bot **commits to a plan** instead of offering a menu. One destination per we
 Once watched: daily fare re-check on that exact itinerary, a ping only on a ±10% move or a new floor, auto-retire when the window passes.
 
 ### C. Slash commands
-`/join` · `/airports add|remove` · `/flight add|remove|list` · `/trip` (Aspen status on demand) · `/build [destination] [month]` (force a build) · `/watch <id>` / `/unwatch <id>` · `/quiet <days>` (mute non-urgent posts).
+`/join` · `/airports add|remove` · `/flight add|remove|list` · `/trip` (Aspen status on demand) · `/snapshot [spot] [region]` · `/build` (what's worth watching) or `/build destination [month]` (price it) · `/quiet <days>` (mute non-urgent posts). `/watch` and `/unwatch` are built but unregistered (backlogged, see `PULL-MODEL.md`).
 
 Out of scope for v1: booking anything, Airbnb scraping, DMs, a web dashboard.
 
 ---
 
 ## 2. Posting discipline — the single-channel design
+
+> Since `PULL-MODEL.md` the only unprompted posts are the Aspen anchor and
+> trip-day flight status. Everything below still holds for those, and for
+> priced dossiers someone asks for.
 
 **1. One self-editing anchor message.** The Aspen status lives in a *single pinned message that the bot edits in place* — "❄️ ASPEN · 47 days out · 34" base · next storm Thu (high confidence)". Weekly and daily updates rewrite that message rather than posting a new one.
 

@@ -319,6 +319,55 @@ export function passStatusLookup(
   }));
 }
 
+/* ----------------------------------------------- pass access v2 (P3) */
+
+/**
+ * The questions that actually decide a trip: is it on the pass, how many days,
+ * which dates are blacked out. Unlike `passStatusLookup` this is asked once per
+ * resort and pass, not per window — blackouts are season-wide — and
+ * `passCheck()` applies a window to the answer. Pass terms change seasonally,
+ * so it is cached for a week.
+ */
+export const PASS_COMPARE_URL = 'https://www.ikonpass.com/en/compare-passes';
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
+export const PassAccessSchema = z.object({
+  onPass: z.boolean().nullable().describe('is the resort on this pass at all this season'),
+  daysLimit: z
+    .union([z.number().int().positive(), z.literal('unlimited')])
+    .nullable()
+    .describe('days the pass allows at this resort this season, "unlimited", or null if unknown'),
+  blackouts: z
+    .array(z.object({ start: isoDay, end: isoDay }))
+    .describe('blackout date ranges this season, inclusive, YYYY-MM-DD; empty if none'),
+  notes: z
+    .string()
+    .describe('access caveats, e.g. "Snowbird only", "tram not included", "Nov 1–Apr 30", "shared with Pico"'),
+});
+export type PassAccess = z.infer<typeof PassAccessSchema>;
+
+export const passAccessSpec: LookupSpec<PassAccess> = {
+  name: 'lookup:pass-access',
+  schema: PassAccessSchema,
+  ttlMinutes: 7 * 24 * 60,
+};
+
+export type PassName = 'ikon_base' | 'ikon';
+export const PASS_LABEL: Record<PassName, string> = { ikon_base: 'Ikon Base Pass', ikon: 'Ikon Pass' };
+
+export function passAccessLookup(
+  llm: Completer,
+): Source<{ resort: string; pass: PassName; season: string }, LookupResult<PassAccess>> {
+  return typed(llm, passAccessSpec, ({ resort, pass, season }) => ({
+    question:
+      `For the ${season} season, is ${resort} on the ${PASS_LABEL[pass]}? How many days does ` +
+      'that pass allow there (or is it unlimited), and which date ranges are blacked out? ' +
+      `Use ${PASS_COMPARE_URL} as the primary source and the resort's own page to confirm.`,
+    context: { resort, pass, season, primarySource: PASS_COMPARE_URL },
+  }));
+}
+
 /**
  * The resort's own average snowfall — the headline number the group will
  * recognise ("Niseko gets ~15m a season"). The archive can say *how often* it

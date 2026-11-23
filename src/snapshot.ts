@@ -1,6 +1,8 @@
-import type { Config, Destination } from './config.js';
+import { DISPLAY_GROUPS, type Config, type Destination, type DisplayGroup } from './config.js';
 import { optionalSecret } from './config.js';
 import type { DB } from './db.js';
+import type { CompleteOptions } from './llm/client.js';
+import { checkRead, READ_SYSTEM_PROMPT, readFacts, renderReadPrompt } from './llm/prompts/snapshot.js';
 import type { Logger } from './logger.js';
 import { cached } from './sources/_cache.js';
 import type { Fetched, Source } from './sources/types.js';
@@ -39,13 +41,15 @@ import {
  *   gatherSnapshot   the only I/O: every source through `cached()`, with the
  *                    params the builder and Aspen update already use, so their
  *                    cache rows are shared
- *   composeSnapshot  pure: numbers, cells, regions, callouts
+ *   composeSnapshot  pure: numbers, cells, display groups, callouts
  *   renderSnapshot   pure: the Discord message, ≤2,000 chars, a 36-column
  *                    code block that doesn't scroll sideways on a phone
  *
- * No LLM: the copy is templated, so it is instant, free, and cannot invent a
- * number. `assertSnapshotHonest` checks the one rule that matters most —
- * every snow number printed is a modelled total.
+ * The read above the table is Haiku's (PULL-MODEL P5), written from the
+ * composed Snapshot only and checked number by number; anything it gets wrong
+ * falls back to the templated callouts, which cannot invent a number.
+ * `assertSnapshotHonest` checks the one rule that matters most — every snow
+ * number printed is a modelled total — on whatever goes out.
  */
 
 export const SNAPSHOT_DAYS = 7;
@@ -56,6 +60,14 @@ export const BLOCK_MAX_COLS = 36;
 const MAX_CALLOUTS = 3;
 /** cm. A snow callout or a split needs at least this much in some model. */
 const NOTABLE_SNOW_CM = 5;
+/** Days 8–15: the look-ahead window starts this many days after today. */
+export const LOOKAHEAD_FROM_DAY = 8;
+export const LOOKAHEAD_TO_DAY = 15;
+/** cm. A look-ahead storm needs this much in its biggest model… */
+const LOOKAHEAD_MIN_CM = 10;
+/** …and at least this many models showing NOTABLE_SNOW_CM or more. */
+const LOOKAHEAD_MIN_MODELS = 2;
+const MAX_LOOKAHEAD = 3;
 /** km/h. Median daily gust at which lifts start to hold. */
 const WIND_HOLD_KMH = 70;
 /** At 6, a cold snapshot (16 spots × 3–4 models) drew "429: Too many concurrent requests". */
@@ -63,30 +75,24 @@ const OPEN_METEO_CONCURRENCY = 3;
 const BIGQUERY_CONCURRENCY = 4;
 
 const COLS = { name: 13, snow: 7, temp: 9, gust: 5 } as const;
-const GLYPH: Record<Agreement, string> = { agree: '●', partly: '◐', split: '○' };
-const REGION_TITLE: Record<Region, string> = {
-  JP: 'JAPAN',
-  CA: 'CANADA',
-  US: 'USA',
-  EU: 'EUROPE',
-};
-/** Board names are long ("Fernie Alpine Resort"); the table has 11 columns. */
+export const GLYPH: Record<Agreement, string> = { agree: '●', partly: '◐', split: '○' };
+/** Board names are long ("Big Bear (Snow Summit)"); the table has 11 columns. */
 const SHORT_NAMES: Record<string, string> = {
-  niseko: 'Niseko',
-  rusutsu: 'Rusutsu',
-  hakuba: 'Hakuba',
-  nozawa: 'Nozawa',
-  whistler: 'Whistler',
-  revelstoke: 'Revelstoke',
-  banff: 'Banff/LL',
-  fernie: 'Fernie',
-  jackson: 'Jackson',
-  'big-sky': 'Big Sky',
-  'alta-snowbird': 'Snowbird',
+  'big-bear': 'Big Bear',
+  mammoth: 'Mammoth',
   palisades: 'Palisades',
+  killington: 'Killington',
+  stratton: 'Stratton',
+  sugarbush: 'Sugarbush',
+  'winter-park': 'Winter Park',
+  steamboat: 'Steamboat',
+  solitude: 'Solitude',
+  snowbird: 'Snowbird',
+  'big-sky': 'Big Sky',
+  niseko: 'Niseko',
+  banff: 'Banff/LL',
   chamonix: 'Chamonix',
   zermatt: 'Zermatt',
-  'st-anton': 'St. Anton',
 };
 
 /* ---------------------------------------------------------------- types */
@@ -95,8 +101,8 @@ export type Spot = {
   id: string;
   /** What the table and callouts call it; ≤11 characters. */
   label: string;
-  /** 'ASPEN' sits above the regions as its own row. */
-  group: 'ASPEN' | Region;
+  /** 'ASPEN' sits above the display groups as its own row. */
+  group: 'ASPEN' | DisplayGroup;
   /** Which regional cross-check models cover it. */
   region: Region;
   base: Coord;
@@ -132,6 +138,8 @@ export type SpotSnapshot = {
   cell: SnowCell;
   /** Worse of snow confidence and temperature agreement; null with no data. */
   agreement: Agreement | null;
+  /** Days 8–15: modelled totals from the models that reach that far. */
+  lookAhead: SnowReport | null;
   missing: string[];
 };
 
@@ -140,8 +148,10 @@ export type Snapshot = {
   timezone: string;
   aspenLabel: string;
   spots: SpotSnapshot[];
-  regions: { region: Region; pattern: string }[];
+  groups: { group: DisplayGroup; pattern: string }[];
   callouts: string[];
+  /** Storms the models are starting to agree on in days 8–15, biggest first. */
+  lookAhead: { spot: Spot; lowCm: number; highCm: number; models: number }[];
   /** Display names of every source that contributed, in a stable order. */
   sources: string[];
   /** Sources that failed, with how many spots they failed for. */
@@ -178,7 +188,7 @@ function boardSpot(d: Destination): Spot {
   return {
     id: d.id,
     label: short.length > 11 ? short.slice(0, 10) + '…' : short,
-    group: d.region,
+    group: d.group,
     region: d.region,
     base: { lat: d.lat, lon: d.lon, label: 'base', elevationM: d.base_elevation_m },
     baseElevationM: d.base_elevation_m,
@@ -198,6 +208,8 @@ export type GatherOptions = {
   weathernext?: boolean;
   /** Tests answer by source name; production goes through `cached()`. */
   fetch?: SnapshotFetch;
+  /** Only these spot ids (a /snapshot region: or spot:). Default: every spot. */
+  only?: readonly string[];
 };
 
 /** Same gate as the Aspen update: a project id and credentials in env. */
@@ -221,7 +233,7 @@ export async function gatherSnapshot(
   const bigquery = pool(BIGQUERY_CONCURRENCY);
   const wnSource = useWn ? weathernextSource(cfg) : null;
 
-  const spots = snapshotSpots(cfg);
+  const spots = snapshotSpots(cfg).filter((s) => !opts.only || opts.only.includes(s.id));
   const gathered = await Promise.all(
     spots.map(async (spot): Promise<SpotInputs> => {
       const missing: string[] = [];
@@ -294,10 +306,10 @@ export async function gatherSnapshot(
 export function composeSnapshot(inputs: SnapshotInputs): Snapshot {
   const spots = inputs.spots.map((s) => composeSpot(s, inputs.now));
 
-  const regions: Snapshot['regions'] = [];
-  for (const region of ['JP', 'CA', 'US', 'EU'] as const) {
-    const rows = spots.filter((s) => s.spot.group === region);
-    if (rows.length) regions.push({ region, pattern: regionPattern(rows) });
+  const groups: Snapshot['groups'] = [];
+  for (const group of DISPLAY_GROUPS) {
+    const rows = spots.filter((s) => s.spot.group === group);
+    if (rows.length) groups.push({ group, pattern: groupPattern(rows) });
   }
 
   const contributing = new Set<string>();
@@ -319,8 +331,9 @@ export function composeSnapshot(inputs: SnapshotInputs): Snapshot {
     timezone: inputs.timezone,
     aspenLabel: aspenLabel(inputs.now, inputs.timezone, inputs.aspenWindow),
     spots,
-    regions,
+    groups,
     callouts: pickCallouts(spots),
+    lookAhead: pickLookAhead(spots),
     sources: SOURCE_ORDER.filter((m) => contributing.has(m)).map(modelName),
     missing: [...missing].map(([source, spots]) => ({ source, spots })),
     oldestFetch: fetched[0] ?? null,
@@ -351,6 +364,7 @@ function composeSpot(input: SpotInputs, now: Date): SpotSnapshot {
       conditions: null,
       cell: { kind: 'none' },
       agreement: null,
+      lookAhead: null,
       missing: input.missing,
     };
   }
@@ -380,8 +394,44 @@ function composeSpot(input: SpotInputs, now: Date): SpotSnapshot {
     conditions,
     cell: snowCell(snow, conditions),
     agreement: worst([fromConfidence(snow.confidence), conditions.tempAgreement]),
+    lookAhead: buildSnowReport({
+      window: lookAheadWindow(start),
+      base: models,
+      utcOffsetHours: offset,
+      baseElevationM: spot.baseElevationM,
+      summitElevationM: spot.summitElevationM,
+    }),
     missing: input.missing,
   };
+}
+
+export function lookAheadWindow(today: string): DateWindow {
+  return { start: addDays(today, LOOKAHEAD_FROM_DAY - 1), end: addDays(today, LOOKAHEAD_TO_DAY - 1) };
+}
+
+/**
+ * Days 8–15: only storms at least two models are showing. Totals are the
+ * models' own (whichever reach that far); the line always says low confidence.
+ */
+export function pickLookAhead(rows: readonly SpotSnapshot[]): Snapshot['lookAhead'] {
+  const out: Snapshot['lookAhead'] = [];
+  for (const r of rows) {
+    const totals = (r.lookAhead?.models ?? []).map((m) => Math.round(m.totalCm));
+    if (!totals.length) continue;
+    const showing = totals.filter((t) => t >= NOTABLE_SNOW_CM).length;
+    const highCm = Math.max(...totals);
+    if (showing < LOOKAHEAD_MIN_MODELS || highCm < LOOKAHEAD_MIN_CM) continue;
+    out.push({ spot: r.spot, lowCm: Math.min(...totals), highCm, models: showing });
+  }
+  return out.sort((a, b) => b.highCm - a.highCm).slice(0, MAX_LOOKAHEAD);
+}
+
+export function lookAheadLine(s: Snapshot): string {
+  if (!s.lookAhead.length) {
+    return `🔭 **Days ${LOOKAHEAD_FROM_DAY}–${LOOKAHEAD_TO_DAY}:** nothing the models agree on yet.`;
+  }
+  const list = s.lookAhead.map((x) => `${x.spot.label} ${rangeText(x)}`).join(', ');
+  return `🔭 **Days ${LOOKAHEAD_FROM_DAY}–${LOOKAHEAD_TO_DAY}, low confidence:** ${list} — models starting to line up.`;
 }
 
 /** A range of real model totals when anything falls as snow; otherwise what does fall. */
@@ -406,8 +456,8 @@ function worst(xs: (Agreement | null)[]): Agreement | null {
   return known.reduce((a, b) => (RANK[b] > RANK[a] ? b : a));
 }
 
-/** A few words for a region, from a fixed vocabulary — never free text. */
-export function regionPattern(rows: readonly SpotSnapshot[]): string {
+/** A few words for a display group, from a fixed vocabulary — never free text. */
+export function groupPattern(rows: readonly SpotSnapshot[]): string {
   const live = rows.filter((r) => r.conditions !== null);
   if (!live.length) return 'no data';
   const half = live.length / 2;
@@ -531,7 +581,7 @@ export function pickCallouts(rows: readonly SpotSnapshot[]): string[] {
   return out.slice(0, MAX_CALLOUTS);
 }
 
-function ensemblePhrase(r: SnowReport): string {
+export function ensemblePhrase(r: SnowReport): string {
   if (r.ensembleBand === null) return '';
   if (r.ensembleBand.relativeWidth >= WIDE_BAND) return ", and WeatherNext's 64 runs are wide open";
   if (r.ensembleBand.relativeWidth <= NARROW_BAND)
@@ -552,20 +602,49 @@ function aspenLabel(now: Date, timezone: string, w: DateWindow): string {
 
 /* --------------------------------------------------------------- render */
 
-export function renderSnapshot(s: Snapshot): string {
+export type RenderOptions = {
+  /** The written read above the table (P5); null or absent for none. */
+  read?: string | null;
+};
+
+/**
+ * Head, the read, the table, callouts, the look-ahead, the footer. Over
+ * budget, callouts go first, then the read is cut to its first sentence, then
+ * the read and the look-ahead go.
+ */
+export function renderSnapshot(s: Snapshot, opts: RenderOptions = {}): string {
   const block = renderTable(s);
   const live = s.spots.filter((r) => r.snow !== null).length;
   const head = `❄️ **Snapshot** · next ${SNAPSHOT_DAYS} days · ${live} spot${live === 1 ? '' : 's'} · ${s.sources.length} source${s.sources.length === 1 ? '' : 's'}`;
   const foot = footer(s);
 
-  const callouts = [...s.callouts];
-  const compose = () => [head, '```', block, '```', ...callouts, foot].join('\n');
+  const callouts = opts.read ? [] : [...s.callouts];
+  let read = opts.read?.trim() || null;
+  let ahead: string | null = lookAheadLine(s);
+  const compose = () =>
+    [head, ...(read ? [read] : []), '```', block, '```', ...callouts, ...(ahead ? [ahead] : []), foot].join(
+      '\n',
+    );
   let text = compose();
   while (text.length > DISCORD_MAX_CHARS && callouts.length) {
     callouts.pop();
     text = compose();
   }
+  if (text.length > DISCORD_MAX_CHARS && read) {
+    read = firstSentence(read);
+    text = compose();
+  }
+  if (text.length > DISCORD_MAX_CHARS) {
+    read = null;
+    ahead = null;
+    text = compose();
+  }
   return text.length > DISCORD_MAX_CHARS ? text.slice(0, DISCORD_MAX_CHARS - 1) + '…' : text;
+}
+
+export function firstSentence(text: string): string {
+  const m = /^.*?[.!?](?=\s|$)/s.exec(text.trim());
+  return (m ? m[0] : text).trim();
 }
 
 export function renderTable(s: Snapshot): string {
@@ -578,9 +657,9 @@ export function renderTable(s: Snapshot): string {
   );
   const aspen = s.spots.find((r) => r.spot.group === 'ASPEN');
   if (aspen) lines.push(row(s.aspenLabel, aspen));
-  for (const { region, pattern } of s.regions) {
-    lines.push(clip(`${REGION_TITLE[region]} · ${pattern}`));
-    for (const r of s.spots.filter((x) => x.spot.group === region)) {
+  for (const { group, pattern } of s.groups) {
+    lines.push(clip(`${group} · ${pattern}`));
+    for (const r of s.spots.filter((x) => x.spot.group === group)) {
       lines.push(row(` ${r.spot.label}`, r));
     }
   }
@@ -617,7 +696,7 @@ export function cellText(cell: SnowCell): string {
   }
 }
 
-function rangeText(cell: { lowCm: number; highCm: number }): string {
+export function rangeText(cell: { lowCm: number; highCm: number }): string {
   return cell.lowCm === cell.highCm ? `${cell.highCm}cm` : `${cell.lowCm}–${cell.highCm}cm`;
 }
 
@@ -636,7 +715,7 @@ function footer(s: Snapshot): string {
   return `-# ${bits.join(' · ')}`;
 }
 
-function clip(line: string): string {
+export function clip(line: string): string {
   return line.length <= BLOCK_MAX_COLS ? line : line.slice(0, BLOCK_MAX_COLS - 1) + '…';
 }
 
@@ -652,6 +731,7 @@ export function assertSnapshotHonest(s: Snapshot, text: string): void {
   for (const r of s.spots) {
     const totals = new Set((r.snow?.models ?? []).map((m) => Math.round(m.totalCm)));
     totals.forEach((t) => allowed.add(t));
+    for (const m of r.lookAhead?.models ?? []) allowed.add(Math.round(m.totalCm));
     if (r.cell.kind === 'range') {
       for (const n of [r.cell.lowCm, r.cell.highCm]) {
         if (!totals.has(n)) {
@@ -672,29 +752,77 @@ export function assertSnapshotHonest(s: Snapshot, text: string): void {
 export const SNAPSHOT_UNAVAILABLE =
   "Couldn't reach any forecast source just now — try `/snapshot` again in a few minutes.";
 
+/** The slice of `LlmClient` the read needs. */
+export type ReadWriter = { complete(prompt: string, opts: CompleteOptions): Promise<string> };
+
+export type RunOptions = GatherOptions & {
+  /** Filter the table to one display group; Aspen stays first. */
+  group?: DisplayGroup;
+  /** Haiku for the read; without one, the templated callouts run as before. */
+  llm?: ReadWriter | null;
+};
+
 /** Gather, compose, render, audit. What `/snapshot` and the CLI job both call. */
-export async function runSnapshot(
-  ctx: GatherContext,
-  opts: GatherOptions,
-): Promise<SnapshotResult> {
+export async function runSnapshot(ctx: GatherContext, opts: RunOptions): Promise<SnapshotResult> {
   const started = Date.now();
-  const inputs = await gatherSnapshot(ctx, opts);
+  const only =
+    opts.only ??
+    (opts.group
+      ? ['aspen', ...ctx.cfg.board.filter((d) => d.group === opts.group).map((d) => d.id)]
+      : undefined);
+  const inputs = await gatherSnapshot(ctx, { ...opts, ...(only ? { only } : {}) });
   const snapshot = composeSnapshot(inputs);
   const live = snapshot.spots.filter((r) => r.snow !== null).length;
   if (live === 0) {
     ctx.log.warn('snapshot: no spot had any forecast');
     return { ok: false, text: SNAPSHOT_UNAVAILABLE, snapshot };
   }
-  const text = renderSnapshot(snapshot);
-  assertSnapshotHonest(snapshot, text);
+  const read = opts.llm ? await writeRead(ctx.log, opts.llm, snapshot) : null;
+  let text = renderSnapshot(snapshot, { read });
+  try {
+    assertSnapshotHonest(snapshot, text);
+  } catch (err) {
+    if (!read) throw err;
+    // The read passed its own check but the whole message didn't: drop it.
+    ctx.log.warn('snapshot read failed the audit — using the callouts', { error: String(err) });
+    text = renderSnapshot(snapshot);
+    assertSnapshotHonest(snapshot, text);
+  }
   ctx.log.info('snapshot', {
     spots: live,
     sources: snapshot.sources,
     missing: snapshot.missing,
+    read: read !== null,
     chars: text.length,
     ms: Date.now() - started,
   });
   return { ok: true, text, snapshot };
+}
+
+/** Haiku's read, or null when it fails, invents a number, or misbehaves. */
+export async function writeRead(
+  log: Logger,
+  llm: ReadWriter,
+  snapshot: Snapshot,
+): Promise<string | null> {
+  const facts = readFacts(snapshot);
+  try {
+    const raw = await llm.complete(renderReadPrompt(facts), {
+      model: 'fast',
+      system: READ_SYSTEM_PROMPT,
+      maxTokens: 300,
+      temperature: 0.3,
+    });
+    const checked = checkRead(raw, facts);
+    if (!checked.ok) {
+      log.warn('snapshot read rejected — using the callouts', { why: checked.why });
+      return null;
+    }
+    return checked.read;
+  } catch (err) {
+    log.warn('snapshot read unavailable — using the callouts', { error: String(err) });
+    return null;
+  }
 }
 
 /* -------------------------------------------------------------- helpers */
@@ -716,11 +844,11 @@ export function pool(n: number): <T>(fn: () => Promise<T>) => Promise<T> {
 }
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-function weekday(date: string): string {
+export function weekday(date: string): string {
   return DOW[new Date(`${date}T00:00:00Z`).getUTCDay()]!;
 }
 
-function metres(m: number): string {
+export function metres(m: number): string {
   return `${(Math.round(m / 100) * 100).toLocaleString('en-US')}m`;
 }
 
@@ -733,7 +861,7 @@ function localDate(now: Date, timezone: string): string {
   }).format(now);
 }
 
-function clock(d: Date, timezone: string): string {
+export function clock(d: Date, timezone: string): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     weekday: 'short',
@@ -744,7 +872,7 @@ function clock(d: Date, timezone: string): string {
   return parts.replace(',', '');
 }
 
-function addDays(date: string, n: number): string {
+export function addDays(date: string, n: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 }
 
@@ -753,6 +881,6 @@ function daysBetween(from: string, to: string): number {
 }
 
 /** `source_cache` stores 'YYYY-MM-DD HH:MM:SS' in UTC. */
-function sqliteUtcToIso(s: string): string {
+export function sqliteUtcToIso(s: string): string {
   return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
 }

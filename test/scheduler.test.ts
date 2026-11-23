@@ -32,10 +32,28 @@ describe('SCHEDULE', () => {
     for (const name of Object.keys(SCHEDULE)) expect(KNOWN_JOBS).toContain(name);
   });
 
-  it('never puts noop on the clock and keeps the weekly build on Monday', () => {
+  it('never puts noop on the clock', () => {
     expect(SCHEDULE.noop).toBeNull();
-    expect(SCHEDULE.expeditionBuild).toBe('0 8 * * 1');
     expect(TIMEZONE).toBe('America/New_York');
+  });
+
+  it('holds exactly aspenUpdate and flightWatch on the clock (pull model, P1)', () => {
+    const onClock = Object.entries(SCHEDULE)
+      .filter(([, e]) => e !== null)
+      .map(([n]) => n)
+      .sort();
+    expect(onClock).toEqual(['aspenUpdate', 'flightWatch']);
+    expect(SCHEDULE.aspenUpdate).toBe('0 7 * * *');
+    expect(SCHEDULE.flightWatch).toBe('10 * * * *');
+  });
+
+  it('keeps the backlogged jobs known but off the clock', () => {
+    const { calls, schedule } = fakeCron();
+    const jobs = Object.fromEntries(KNOWN_JOBS.map((n) => [n, fakeJob(n)]));
+    const s = startScheduler(jobs, { env: {}, log, schedule });
+    expect(s.scheduled.sort()).toEqual(['aspenUpdate', 'flightWatch']);
+    expect(calls.map((c) => c.name)).not.toContain('expeditionBuild');
+    expect(calls.map((c) => c.name)).not.toContain('expeditionWatch');
   });
 });
 

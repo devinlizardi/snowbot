@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildExpedition, type Expedition, type ExpeditionInputs } from '../src/builder.js';
+import { buildExpedition, quoteFor, type Expedition, type ExpeditionInputs } from '../src/builder.js';
 import { loadConfig, type Config, type Destination } from '../src/config.js';
 import { kvGet, kvSet, openDb, type DB } from '../src/db.js';
 import { Poster } from '../src/discord/client.js';
@@ -11,7 +11,9 @@ import {
   KV_LAST_BUILD,
   kvDetailsKey,
   type LastBuild,
+  KV_RECENT_QUOTES,
   pickWindow,
+  rememberQuote,
   runExpeditionBuild,
   type ExpeditionBuildDeps,
   type SnowSignal,
@@ -311,17 +313,17 @@ describe('pickWindow', () => {
   it('starts on the first Friday or Saturday of the season at least 21 days out and runs ideal_days', () => {
     // Sep 14 + 21 = Mon Oct 5, but nothing is open until Dec 1 (a Tuesday); the next Fri is Dec 4.
     expect(pickWindow(by('niseko'), NOW)).toEqual({ start: '2026-12-04', end: '2026-12-13' });
-    expect(pickWindow(by('revelstoke'), NOW)).toEqual({ start: '2026-12-04', end: '2026-12-10' });
+    expect(pickWindow(by('banff'), NOW)).toEqual({ start: '2026-12-04', end: '2026-12-10' });
   });
 
   it('respects the lead time once the season is already open', () => {
     // Jan 2 + 21 = Jan 23 (Sat) — take it.
-    expect(pickWindow(by('jackson'), new Date('2027-01-02T00:00:00Z')).start).toBe('2027-01-23');
+    expect(pickWindow(by('big-sky'), new Date('2027-01-02T00:00:00Z')).start).toBe('2027-01-23');
   });
 
   it('rolls past the end of the season into the next one', () => {
     // Mid-April: the 21-day lead lands after Apr 15, so the next window is Dec 3, 2027 (a Fri).
-    expect(pickWindow(by('jackson'), new Date('2027-04-10T00:00:00Z')).start).toBe('2027-12-03');
+    expect(pickWindow(by('big-sky'), new Date('2027-04-10T00:00:00Z')).start).toBe('2027-12-03');
   });
 
   it('honours a month hint', () => {
@@ -332,9 +334,9 @@ describe('pickWindow', () => {
   });
 
   it('skips a window that touches the Aspen trip ±3 days', () => {
-    // From Dec 20, whistler's 7 days: Fri Jan 15–21 ends on the buffer's first day,
+    // From Dec 20, banff's 7 days: Fri Jan 15–21 ends on the buffer's first day,
     // every start through Sat Jan 30 sits inside it; Fri Feb 5 is the first clear one.
-    expect(pickWindow(by('whistler'), new Date('2026-12-20T00:00:00Z'), undefined, aspen)).toEqual({
+    expect(pickWindow(by('banff'), new Date('2026-12-20T00:00:00Z'), undefined, aspen)).toEqual({
       start: '2027-02-05',
       end: '2027-02-11',
     });
@@ -344,16 +346,16 @@ describe('pickWindow', () => {
       end: '2027-02-14',
     });
     // Without the Aspen window there is nothing to avoid.
-    expect(pickWindow(by('whistler'), new Date('2026-12-20T00:00:00Z')).start).toBe('2027-01-15');
+    expect(pickWindow(by('banff'), new Date('2026-12-20T00:00:00Z')).start).toBe('2027-01-15');
   });
 
   it('falls through to the first in-season window after a hinted month that is already too close', () => {
-    const w = pickWindow(by('jackson'), NOW, '2026-09');
+    const w = pickWindow(by('big-sky'), NOW, '2026-09');
     expect(w.start).toBe('2026-12-04');
   });
 
   it('takes a hinted month at face value even outside the season', () => {
-    expect(pickWindow(by('jackson'), NOW, '2026-11').start).toBe('2026-11-06');
+    expect(pickWindow(by('big-sky'), NOW, '2026-11').start).toBe('2026-11-06');
   });
 });
 
@@ -404,19 +406,48 @@ describe('expedition climate', () => {
 describe('quotes', () => {
   it("uses the destination's own quote, else a pool quote chosen stably by id, else none", () => {
     expect(buildExpedition(nisekoInputs(), cfg, NOW).quote?.by).toBe('Matsuo Bashō');
-    const whistler = by('whistler');
-    const a = buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote;
-    const b = buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote;
+    const unquoted = by('steamboat'); // no pitch.quote of its own
+    const a = buildExpedition(nisekoInputs({ dest: unquoted }), cfg, NOW).quote;
+    const b = buildExpedition(nisekoInputs({ dest: unquoted }), cfg, NOW).quote;
     expect(cfg.expedition.quote_pool).toContainEqual(a);
     expect(b).toEqual(a);
     cfg.expedition.quote_pool = [];
-    expect(buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW).quote).toBeNull();
-    expect(fallbackRender(buildExpedition(nisekoInputs({ dest: whistler }), cfg, NOW)).root).not.toMatch(/^> /m);
+    expect(buildExpedition(nisekoInputs({ dest: unquoted }), cfg, NOW).quote).toBeNull();
+    expect(fallbackRender(buildExpedition(nisekoInputs({ dest: unquoted }), cfg, NOW)).root).not.toMatch(/^> /m);
+  });
+
+  it('skips a quote another expedition used recently, but a rebuild keeps its own', () => {
+    const steamboat = by('steamboat');
+    const first = quoteFor(steamboat, cfg, 'steamboat-0206')!;
+    const recent = [{ id: 'solitude-0206', text: first.text }];
+    const other = quoteFor(steamboat, cfg, 'steamboat-0206', recent);
+    expect(other).not.toBeNull();
+    expect(other!.text).not.toBe(first.text);
+    // A rebuild of the same expedition keeps the quote it already went out with.
+    expect(quoteFor(steamboat, cfg, 'steamboat-0206', [{ id: 'steamboat-0206', text: first.text }])).toEqual(first);
+    // A destination's own quote is skipped too when someone else just used it.
+    const niseko = by('niseko');
+    const own = niseko.pitch.quote!;
+    expect(quoteFor(niseko, cfg, 'niseko-0206', [{ id: 'x', text: own.text }])?.text).not.toBe(own.text);
+    // Nothing fresh left: no quote.
+    const all = [own, ...cfg.expedition.quote_pool].map((q) => ({ id: 'x', text: q.text }));
+    expect(quoteFor(niseko, cfg, 'niseko-0206', all)).toBeNull();
+  });
+
+  it('remembers only the last few quotes', () => {
+    const db = openDb(':memory:');
+    for (let i = 0; i < 6; i += 1) rememberQuote(db, `e${i}`, `q${i}`);
+    expect(JSON.parse(kvGet(db, KV_RECENT_QUOTES)!)).toEqual([
+      { id: 'e5', text: 'q5' },
+      { id: 'e4', text: 'q4' },
+      { id: 'e3', text: 'q3' },
+      { id: 'e2', text: 'q2' },
+    ]);
   });
 
   it('every quote in config is attributed', () => {
     const all = [...cfg.board.flatMap((d) => (d.pitch.quote ? [d.pitch.quote] : [])), ...cfg.expedition.quote_pool];
-    expect(all.length).toBeGreaterThanOrEqual(9);
+    expect(all.length).toBeGreaterThanOrEqual(7);
     for (const q of all) {
       expect(q.by.trim()).not.toBe('');
       expect(q.source.trim()).not.toBe('');
@@ -439,7 +470,7 @@ describe('dossier prompt + fallback', () => {
     expect(prompt).toContain('"headerLine"');
     expect(prompt).toContain('M3: BUR $684 / LAX $511');
     const t = trimForPrompt(e);
-    expect(t.watchCommand).toBe('/watch niseko-0206');
+    expect(prompt).not.toMatch(/\/watch|decideBy|ceiling/);
     expect(t.destination.pitch.hook).toMatch(/powder/);
     expect(t.snow.mode).toBe('history');
     // Past the horizon there is no forecast to misread as one.
@@ -469,8 +500,8 @@ describe('dossier prompt + fallback', () => {
     expect(d.root).toContain('❄️ **The snow**');
     expect(d.root).toContain('💸 **All-in** — **$');
     expect(d.root).toContain('at Hirafu Pine Chalet');
-    expect(d.root).toContain('**Decide by 2026-09-28.**');
-    expect(d.root).toContain('`/watch niseko-0206`');
+    // Pull model: a price check, not a deadline.
+    expect(d.root).not.toMatch(/Decide by|\/watch|ceiling/);
     expect(d.details).toHaveLength(3);
   });
 
@@ -489,7 +520,7 @@ describe('dossier prompt + fallback', () => {
     expect(rows.find((r) => r.startsWith('M3'))).toContain('$551*');
     for (const r of rows) expect(r.length).toBeLessThanOrEqual(42);
     for (const line of e.routing.deltaLines) expect(flights).toContain(line);
-    expect(flights).toMatch(/📉 JFK fares across/);
+    expect(flights).not.toMatch(/📉/);
   });
 
   it('draws the stay as a table with a clickable, non-unfurling link per option', () => {
@@ -637,15 +668,15 @@ describe('runExpeditionBuild', () => {
     gathered = [];
     snowCalls = [];
     completions = 0;
-    // Rusutsu has the bigger forecast and ranks first; its build is over the ceiling.
+    // Chamonix has the bigger forecast and ranks first; its build is over the ceiling.
     snowFor = (dest) =>
-      dest.id === 'rusutsu'
+      dest.id === 'chamonix'
         ? { forecast10dCm: 95, confidence: 'high', observed7dCm: 40 }
         : dest.id === 'niseko'
           ? { forecast10dCm: 80, confidence: 'high', observed7dCm: 30 }
           : { forecast10dCm: 5, confidence: 'low', observed7dCm: 0 };
     inputsFor = (dest) =>
-      dest.id === 'rusutsu' ? nisekoInputs({ dest }, 1800) : nisekoInputs({ dest });
+      dest.id === 'chamonix' ? nisekoInputs({ dest }, 1800) : nisekoInputs({ dest });
   });
 
   const deps = (): ExpeditionBuildDeps => ({
@@ -707,7 +738,7 @@ describe('runExpeditionBuild', () => {
   it('dry run: ranks, near-misses the over-ceiling leader, builds the runner-up, posts one root', async () => {
     const out = await runExpeditionBuild(ctx(), deps());
     expect(snowCalls).toHaveLength(cfg.board.length);
-    expect(gathered).toEqual(['rusutsu', 'niseko']);
+    expect(gathered).toEqual(['chamonix', 'niseko']);
 
     expect(out?.expedition.id).toBe('niseko-0206');
     expect(out?.forced).toBe(false);
@@ -724,7 +755,7 @@ describe('runExpeditionBuild', () => {
 
     const misses = nearMisses();
     expect(misses).toHaveLength(1);
-    expect(misses[0]).toMatchObject({ destination: 'rusutsu', window_start: '2027-02-06' });
+    expect(misses[0]).toMatchObject({ destination: 'chamonix', window_start: '2027-02-06' });
     expect(misses[0]!.total_pp_usd).toBeGreaterThan(cfg.expedition.ceiling_usd.international);
     expect(misses[0]!.reason).toMatch(/over the \$2600 ceiling/);
 
@@ -742,12 +773,12 @@ describe('runExpeditionBuild', () => {
     cfg.expedition.ceiling_usd = { international: 1200, domestic: 2600 };
     inputsFor = (dest) => nisekoInputs({ dest });
     const out = await runExpeditionBuild(ctx(), deps());
-    expect(['jackson', 'big-sky', 'alta-snowbird', 'palisades']).toContain(
+    expect(cfg.board.filter((d) => d.region === 'US').map((d) => d.id)).toContain(
       out?.expedition.destination.id,
     );
     const misses = nearMisses();
     expect(misses.map((m) => m.destination)).toEqual(
-      expect.arrayContaining(['niseko', 'rusutsu', 'chamonix', 'whistler']),
+      expect.arrayContaining(['niseko', 'banff', 'chamonix', 'zermatt']),
     );
     expect(misses.every((m) => /pre-rank estimate/.test(m.reason))).toBe(true);
   });
@@ -760,20 +791,67 @@ describe('runExpeditionBuild', () => {
     ).run(new Date(NOW.getTime() - 14 * 86_400_000).toISOString().replace('T', ' ').slice(0, 19));
     inputsFor = (dest) => nisekoInputs({ dest });
     const out = await runExpeditionBuild(ctx(), deps());
-    expect(out?.expedition.destination.id).toBe('rusutsu');
-    expect(gathered).toEqual(['rusutsu']);
+    expect(out?.expedition.destination.id).toBe('chamonix');
+    expect(gathered).toEqual(['chamonix']);
   });
 
   it('forced build via kv skips the ranking, ignores the ceiling and clears the request', async () => {
-    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination: 'rusutsu' }));
+    kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination: 'chamonix' }));
     const out = await runExpeditionBuild(ctx(), deps());
     expect(snowCalls).toEqual([]);
-    expect(gathered).toEqual(['rusutsu']);
+    expect(gathered).toEqual(['chamonix']);
     expect(out?.forced).toBe(true);
     expect(out?.expedition.cost.overCeiling).toBe(true);
-    expect(expeditions()[0]).toMatchObject({ id: 'rusutsu-0206', status: 'proposed' });
+    expect(expeditions()[0]).toMatchObject({ id: 'chamonix-0206', status: 'proposed' });
     expect(nearMisses()).toEqual([]);
     expect(kvGet(db, KV_BUILD_REQUEST)).toBeUndefined();
+    expect(posts().map((p) => p.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
+  });
+
+  it('two dossiers in a row never share a quote (the Whistler/Revelstoke repeat)', async () => {
+    // Neither spot has a quote of its own, so both draw from the two-quote pool.
+    const quotes: (string | undefined)[] = [];
+    for (const destination of ['steamboat', 'solitude']) {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination }));
+      const out = await runExpeditionBuild(ctx(), deps());
+      quotes.push(out?.expedition.quote?.text);
+    }
+    expect(quotes.every((q) => q !== undefined)).toBe(true);
+    expect(quotes[0]).not.toBe(quotes[1]);
+    expect(JSON.parse(kvGet(db, KV_RECENT_QUOTES)!)).toHaveLength(2);
+  });
+
+  it('omits the quote when every fresh one is used up', async () => {
+    cfg.expedition.quote_pool = cfg.expedition.quote_pool.slice(0, 1);
+    for (const destination of ['steamboat', 'solitude']) {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination }));
+      await runExpeditionBuild(ctx(), deps());
+    }
+    const second = await (async () => {
+      kvSet(db, KV_BUILD_REQUEST, JSON.stringify({ kind: 'build', destination: 'winter-park' }));
+      return runExpeditionBuild(ctx(), deps());
+    })();
+    expect(second?.expedition.quote).toBeNull();
+    expect(second?.dossier.root).not.toMatch(/^> /m);
+  });
+
+  it('💲 Price it builds exactly the scouted window, with no decide-by and no ceiling talk', async () => {
+    kvSet(
+      db,
+      KV_BUILD_REQUEST,
+      JSON.stringify({ kind: 'build', destination: 'niseko', window: { start: '2027-02-06', end: '2027-02-15' } }),
+    );
+    let asked: { start: string; end: string } | null = null;
+    const d = deps();
+    d.gather = async (_c, dest, window) => {
+      asked = window;
+      return nisekoInputs({ dest }, 1800);
+    };
+    const out = await runExpeditionBuild(ctx(), d);
+    expect(asked).toEqual({ start: '2027-02-06', end: '2027-02-15' });
+    expect(out?.forced).toBe(true);
+    const all = [out!.dossier.root, ...out!.dossier.details].join('\n');
+    expect(all).not.toMatch(/Decide by|decide by|\/watch|ceiling/);
     expect(posts().map((p) => p.kind)).toEqual(['root', 'thread', 'thread', 'thread']);
   });
 
@@ -1041,7 +1119,7 @@ describe('buildReply', () => {
 /* One sanity check that the fixture is what the tests above assume. */
 describe('fixture', () => {
   it('scales over the ceiling with the fare bump', () => {
-    const e: Expedition = buildExpedition(nisekoInputs({ dest: by('rusutsu') }, 1800), cfg, NOW);
+    const e: Expedition = buildExpedition(nisekoInputs({ dest: by('chamonix') }, 1800), cfg, NOW);
     expect(e.cost.overCeiling).toBe(true);
     expect(buildExpedition(nisekoInputs(), cfg, NOW).cost.overCeiling).toBe(false);
   });
